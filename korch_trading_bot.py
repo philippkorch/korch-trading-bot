@@ -32,34 +32,38 @@ logger = logging.getLogger(__name__)
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN', '8999356089:AAEzV2onmpC6oFe-j9M26UTFLxU14N6fSCs')
 TELEGRAM_CHAT_ID = int(os.getenv('TELEGRAM_CHAT_ID', '8999356089'))
 
+# DEMO MODE - использует фиктивные данные вместо реальных
+DEMO_MODE = True
+
 # Risk Management
 RISK_PER_TRADE = 0.01  # 1% per trade
 MAX_DAILY_LOSS = 0.02  # 2% max daily loss
 RISK_REWARD_RATIO = 2  # 1:2 R:R
 
-# Trading Pairs (Philipp's primary focus - EURUSD removed)
+# Trading Pairs (Philipp's primary focus - EURUSD removed, DAX replaced with GER40)
 TRADING_PAIRS = {
-    'DAX': {'symbol': '^GDAXI', 'yf_symbol': '^GDAXI', 'session': 'Frankfurt', 'volatility': 0.005},
+    'GER40': {'symbol': '^GDAXI', 'yf_symbol': '^GDAXI', 'session': 'Frankfurt', 'volatility': 0.005},
     'BTC': {'symbol': 'BTC-USD', 'yf_symbol': 'BTC-USD', 'session': 'NY', 'volatility': 0.03},
     'GOLD': {'symbol': 'GC=F', 'yf_symbol': 'GC=F', 'session': 'London', 'volatility': 0.008},
 }
 
-# Forex News & Economic Calendar (основные события)
+# Forex News & Economic Calendar (основные события с уровнями важности)
+# 🟢 = зелёная (нормально), 🟠 = оранжевая (средняя), 🔴 = красная (критично)
 FOREX_EVENTS = {
-    'DXY': '📊 Индекс доллара (USD Index) - мера силы доллара. Рост = укрепление, падение = ослабление',
-    'NFP': '💼 Non-Farm Payroll (США) - количество новых рабочих мест. Влияет на USD и S&P',
-    'CPI': '📈 Инфляция (USA/EUR). Рост = возможное повышение ставок, укрепление валюты',
-    'ECB': '🏦 Заседание ЕЦБ. Решения о ставках влияют на EUR и европейские индексы',
-    'Fed': '🏛️ Заседание ФРС (США). Решения о ставках влияют на USD и глобальные рынки',
-    'Oil': '⛽ Цена нефти (WTI/Brent). Влияет на доллар и акции энергетических компаний',
-    'Crypto': '₿ Криптовалюты. Новости регуляции влияют на BTC и альткойны',
+    'DXY': {'level': '🟢', 'text': '📊 Индекс доллара (USD Index) - мера силы доллара. Рост = укрепление, падение = ослабление'},
+    'NFP': {'level': '🔴', 'text': '💼 Non-Farm Payroll (США) - КРИТИЧНО! Новые рабочие места. Сильно влияет на USD и S&P'},
+    'CPI': {'level': '🔴', 'text': '📈 Инфляция (USA/EUR) - КРИТИЧНО! Рост = повышение ставок, укрепление валюты'},
+    'ECB': {'level': '🔴', 'text': '🏦 Заседание ЕЦБ - КРИТИЧНО! Решения о ставках влияют на EUR и европейские индексы'},
+    'Fed': {'level': '🔴', 'text': '🏛️ Заседание ФРС (США) - КРИТИЧНО! Решения о ставках влияют на USD и глобальные рынки'},
+    'Oil': {'level': '🟠', 'text': '⛽ Цена нефти (WTI/Brent) - Средняя важность. Влияет на доллар и энергосектор'},
+    'Crypto': {'level': '🟠', 'text': '₿ Криптовалюты - Средняя важность. Новости регуляции влияют на BTC и альткойны'},
 }
 
 # Market Impact Explanations (объяснения влияния на рынок)
 MARKET_IMPACTS = {
-    'DAX': {
+    'GER40': {
         'up': 'Немецкие компании растут! 🚀 Причины: улучшение производства, экспорт, позитив из Европы',
-        'down': 'DAX падает 📉 Причины: слабая экономика, рост ставок, проблемы в Европе, недовольство акционеров',
+        'down': 'GER40 падает 📉 Причины: слабая экономика, рост ставок, проблемы в Европе, недовольство акционеров',
     },
     'BTC': {
         'up': 'Bitcoin взлетел! 🚀 Причины: принятие, вывод с бирж, позитив про регуляцию, инфляция',
@@ -119,10 +123,10 @@ class MarketDataAPI:
 
     async def fetch_ohlcv(self, pair_name: str, pair_config: Dict, timeframe: str = '1h', limit: int = 50) -> List[OHLCV]:
         """
-        Fetch OHLCV data from yfinance
+        Fetch OHLCV data from yfinance (or return demo data if DEMO_MODE is enabled)
 
         Args:
-            pair_name: Trading pair name (e.g., 'DAX', 'EURUSD')
+            pair_name: Trading pair name (e.g., 'GER40', 'BTC')
             pair_config: Configuration dict with yf_symbol
             timeframe: Timeframe (1m, 5m, 1h, 1d)
             limit: Number of candles to fetch
@@ -133,6 +137,11 @@ class MarketDataAPI:
         try:
             yf_symbol = pair_config.get('yf_symbol')
             logger.info(f"Fetching {pair_name} ({yf_symbol}) {timeframe} ({limit} candles)")
+
+            # DEMO MODE - return simulated data instead of real market data
+            if DEMO_MODE:
+                logger.info(f"🎮 DEMO MODE: Generating simulated data for {pair_name}")
+                return self._generate_demo_data(pair_name, limit)
 
             # Check cache
             cache_key = f"{yf_symbol}_{timeframe}"
@@ -173,6 +182,48 @@ class MarketDataAPI:
         except Exception as e:
             logger.error(f"Error fetching {pair_name} ({pair_config.get('yf_symbol')}): {e}")
             return []
+
+    def _generate_demo_data(self, pair_name: str, limit: int = 21) -> List[OHLCV]:
+        """Generate simulated OHLCV data for demo mode"""
+        demo_data = []
+
+        # Demo base prices for each pair
+        base_prices = {
+            'GER40': 18000,
+            'BTC': 42000,
+            'GOLD': 2050,
+        }
+
+        base_price = base_prices.get(pair_name, 100)
+        current_time = datetime.now()
+
+        # Generate candles going backwards in time
+        for i in range(limit, 0, -1):
+            # Simulate realistic price movements
+            volatility = 0.02  # 2% volatility per candle
+            direction = 1 if np.random.random() > 0.5 else -1
+
+            open_price = base_price + (np.random.random() - 0.5) * base_price * volatility
+            close_price = open_price + direction * np.random.random() * base_price * volatility
+            high_price = max(open_price, close_price) + np.random.random() * base_price * 0.005
+            low_price = min(open_price, close_price) - np.random.random() * base_price * 0.005
+            volume = int(np.random.random() * 1000000)
+
+            candle = OHLCV(
+                timestamp=current_time - timedelta(hours=i),
+                open=round(open_price, 2),
+                high=round(high_price, 2),
+                low=round(low_price, 2),
+                close=round(close_price, 2),
+                volume=volume
+            )
+            demo_data.append(candle)
+
+            # Update base price for next candle
+            base_price = close_price
+
+        logger.info(f"📊 Generated {len(demo_data)} demo candles for {pair_name}")
+        return demo_data
 
 
 class StrategyAnalyzer:
@@ -319,7 +370,7 @@ class TelegramBot:
 👋 **Добро пожаловать в Korch Trading Bot!**
 
 🤖 Интерактивный торговый бот с анализом **AMD+FVG** стратегии
-📊 Сигналы для DAX, BTC, GOLD (EURUSD удален)
+📊 Сигналы для GER40, BTC, GOLD (демо-режим)
 
 Выберите опцию меню:
 📈 Анализ рынка
@@ -459,8 +510,41 @@ class TelegramBot:
 
         news_text += "**🌍 Ключевые экономические события:**\n\n"
 
-        for event_key, event_desc in FOREX_EVENTS.items():
-            news_text += f"{event_desc}\n\n"
+        # Группируем события по уровню важности
+        critical = []
+        medium = []
+        normal = []
+
+        for event_key, event_data in FOREX_EVENTS.items():
+            level = event_data['level']
+            text = event_data['text']
+            if level == '🔴':
+                critical.append(text)
+            elif level == '🟠':
+                medium.append(text)
+            else:
+                normal.append(text)
+
+        # КРИТИЧНЫЕ события (красные)
+        if critical:
+            news_text += "**🔴 КРИТИЧНЫЕ СОБЫТИЯ (Опасно для рынка):**\n"
+            for event in critical:
+                news_text += f"• {event}\n"
+            news_text += "\n"
+
+        # Средней важности (оранжевые)
+        if medium:
+            news_text += "**🟠 СРЕДНЯЯ ВАЖНОСТЬ (Внимание):**\n"
+            for event in medium:
+                news_text += f"• {event}\n"
+            news_text += "\n"
+
+        # Нормальные события (зелёные)
+        if normal:
+            news_text += "**🟢 НОРМАЛЬНЫЕ СОБЫТИЯ (Всё хорошо):**\n"
+            for event in normal:
+                news_text += f"• {event}\n"
+            news_text += "\n"
 
         news_text += "---\n\n"
         news_text += "**📊 Влияние на цены:**\n\n"
