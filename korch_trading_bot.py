@@ -743,65 +743,71 @@ class TelegramBot:
         """Show market analysis with AMD+FVG+INTELLECT_city"""
         query = update.callback_query
         
-        # Show loading
         try:
+            # Show loading
             await query.edit_message_text("⏳ Загружаю анализ...", parse_mode='Markdown')
-        except:
-            pass
 
-        text = "**📊 Анализ (AMD+FVG+INTELLECT)**\n\n"
+            text = "**📊 Анализ (AMD+FVG+INTELLECT)**\n\n"
 
-        for pair_name, cfg in TRADING_PAIRS.items():
-            try:
-                # Get data
-                h1 = await self.api.fetch_ohlcv(pair_name, cfg, '1h', 21)
-                m5 = await self.api.fetch_ohlcv(pair_name, cfg, '5m', 30)
+            for pair_name, cfg in TRADING_PAIRS.items():
+                try:
+                    # Get data
+                    h1 = await self.api.fetch_ohlcv(pair_name, cfg, '1h', 21)
+                    m5 = await self.api.fetch_ohlcv(pair_name, cfg, '5m', 30)
 
-                if h1 and len(h1) >= 21:
-                    closes = [c.close for c in h1[-21:]]
-                    ma9 = np.mean(closes[-9:])
-                    ma21 = np.mean(closes[-21:])
-                    cur = closes[-1]
+                    if h1 and len(h1) >= 21:
+                        closes = [c.close for c in h1[-21:]]
+                        ma9 = np.mean(closes[-9:])
+                        ma21 = np.mean(closes[-21:])
+                        cur = closes[-1]
 
-                    # AMD
-                    amd_ok = cur > ma9 > ma21 or cur < ma9 < ma21
-                    amd = "✅" if amd_ok else "❌"
-                    trend = "📈" if cur > ma9 > ma21 else ("📉" if cur < ma9 < ma21 else "—")
+                        # AMD
+                        amd_ok = cur > ma9 > ma21 or cur < ma9 < ma21
+                        amd = "✅" if amd_ok else "❌"
+                        trend = "📈" if cur > ma9 > ma21 else ("📉" if cur < ma9 < ma21 else "—")
 
-                    # FVG
-                    fvg = "✅" if (m5 and len(m5) >= 3) else "❌"
+                        # FVG
+                        fvg = "✅" if (m5 and len(m5) >= 3) else "❌"
 
-                    # INTELLECT
-                    intellect = 50.0
-                    if m5 and len(m5) >= 30:
-                        try:
-                            res = IndicatorAnalyzer().calculate_intellect_city_index(m5[-30:])
-                            if isinstance(res, dict) and 'intellect_score' in res:
-                                intellect = float(res['intellect_score'])
-                        except:
-                            pass
+                        # INTELLECT
+                        intellect = 50.0
+                        if m5 and len(m5) >= 30:
+                            try:
+                                res = IndicatorAnalyzer().calculate_intellect_city_index(m5[-30:])
+                                if isinstance(res, dict) and 'intellect_score' in res:
+                                    intellect = float(res['intellect_score'])
+                            except Exception as ie:
+                                intellect = 50.0
 
-                    intel_emoji = "🟢" if intellect >= 60 else ("🔴" if intellect <= 40 else "🟡")
-                    intel_ok = "✅" if (intellect >= 60 or intellect <= 40) else "🟡"
+                        intel_emoji = "🟢" if intellect >= 60 else ("🔴" if intellect <= 40 else "🟡")
+                        intel_ok = "✅" if (intellect >= 60 or intellect <= 40) else "🟡"
 
-                    # Status
-                    ready = amd_ok and (m5 and len(m5) >= 3) and (intellect >= 60 or intellect <= 40)
-                    status = "🟢 OK" if ready else "🟡 Wait"
+                        # Status
+                        ready = amd_ok and (m5 and len(m5) >= 3) and (intellect >= 60 or intellect <= 40)
+                        status = "🟢 OK" if ready else "🟡 Wait"
 
-                    text += f"`{pair_name}` {trend} | MA:{ma9:.0f}/{ma21:.0f}\n"
-                    text += f"{amd} {fvg} {intel_ok} | {intel_emoji}{intellect:.0f}% | {status}\n\n"
-                else:
-                    text += f"`{pair_name}` - Loading...\n\n"
-            except Exception as e:
-                text += f"`{pair_name}` - Error\n\n"
+                        text += f"`{pair_name}` {trend} | MA:{ma9:.0f}/{ma21:.0f}\n"
+                        text += f"{amd} {fvg} {intel_ok} | {intel_emoji}{intellect:.0f}% | {status}\n\n"
+                    else:
+                        text += f"`{pair_name}` ⏳ Загрузка...\n\n"
+                except Exception as e:
+                    logger.error(f"Analysis error for {pair_name}: {e}")
+                    text += f"`{pair_name}` ❌ Ошибка\n\n"
 
-        text += f"⏰ {datetime.now().strftime('%H:%M')}"
+            text += f"\n⏰ {datetime.now().strftime('%H:%M')}"
 
-        kb = [[InlineKeyboardButton("🔙 Menu", callback_data="menu")]]
-        try:
+            kb = [[InlineKeyboardButton("🔙 Menu", callback_data="menu")]]
             await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown')
-        except:
-            pass
+        except Exception as e:
+            logger.error(f"Analysis handler error: {e}")
+            try:
+                await query.edit_message_text(
+                    "❌ **Ошибка анализа**\n\nПопробуйте ещё раз",
+                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Menu", callback_data="menu")]]),
+                    parse_mode='Markdown'
+                )
+            except:
+                pass
 
     async def status_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show bot status with strategy confirmation breakdown"""
@@ -852,11 +858,22 @@ class TelegramBot:
         keyboard = [[InlineKeyboardButton("🔙 В меню", callback_data="menu")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
-        await update.callback_query.edit_message_text(
-            status_text,
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
+        try:
+            await update.callback_query.edit_message_text(
+                status_text,
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
+            )
+        except Exception as e:
+            logger.error(f"Status handler error: {e}")
+            try:
+                await update.callback_query.edit_message_text(
+                    "❌ **Ошибка статуса**",
+                    reply_markup=reply_markup,
+                    parse_mode='Markdown'
+                )
+            except:
+                pass
 
     async def news_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show forex news and economic calendar"""
