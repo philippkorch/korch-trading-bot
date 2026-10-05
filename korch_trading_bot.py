@@ -33,7 +33,7 @@ TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN', '8999356089:AAEzV2onmpC6oFe
 TELEGRAM_CHAT_ID = int(os.getenv('TELEGRAM_CHAT_ID', '8999356089'))
 
 # DEMO MODE - использует фиктивные данные вместо реальных
-DEMO_MODE = True
+DEMO_MODE = False
 
 # Risk Management
 RISK_PER_TRADE = 0.01  # 1% per trade
@@ -370,7 +370,7 @@ class TelegramBot:
 👋 **Добро пожаловать в Korch Trading Bot!**
 
 🤖 Интерактивный торговый бот с анализом **AMD+FVG** стратегии
-📊 Сигналы для GER40, BTC, GOLD (демо-режим)
+📊 Сигналы для GER40, BTC, GOLD (реальные данные)
 
 Выберите опцию меню:
 📈 Анализ рынка
