@@ -11,7 +11,7 @@ import json
 from datetime import datetime, timedelta
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
-# import aiohttp  # Not used, removed to fix build
+import yfinance as yf
 from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 from telegram.error import TelegramError
@@ -19,6 +19,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from io import BytesIO
 import numpy as np
+import pandas as pd
 
 # Configure logging
 logging.basicConfig(
@@ -30,7 +31,6 @@ logger = logging.getLogger(__name__)
 # Configuration from environment or defaults
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN', '8999356089:AAEzV2onmpC6oFe-j19M26UTFLxU14N6fSCs')
 TELEGRAM_CHAT_ID = int(os.getenv('TELEGRAM_CHAT_ID', '457832510'))
-TRADINGVIEW_SESSION_ID = os.getenv('TRADINGVIEW_SESSION_ID', 'qu1s4tex582n1uzvgl9m35we03cbn6f2')
 
 # Risk Management
 RISK_PER_TRADE = 0.01  # 1% per trade
@@ -39,10 +39,10 @@ RISK_REWARD_RATIO = 2  # 1:2 R:R
 
 # Trading Pairs (Philipp's primary focus)
 TRADING_PAIRS = {
-    'GER40': {'symbol': 'XETRA:DAX', 'timeframe': '1H', 'session': 'Frankfurt', 'volatility': 0.005},
-    'EURUSD': {'symbol': 'FX_IDC:EURUSD', 'timeframe': '1H', 'session': 'London', 'volatility': 0.0015},
-    'BTCUSDT': {'symbol': 'BINANCE:BTCUSDT', 'timeframe': '1H', 'session': 'NY', 'volatility': 0.03},
-    'XAUUSD': {'symbol': 'TVC:GOLD', 'timeframe': '1H', 'session': 'London', 'volatility': 0.008},
+    'DAX': {'symbol': '^GDAXI', 'yf_symbol': '^GDAXI', 'session': 'Frankfurt', 'volatility': 0.005},
+    'EURUSD': {'symbol': 'EURUSD=X', 'yf_symbol': 'EURUSD=X', 'session': 'London', 'volatility': 0.0015},
+    'BTC': {'symbol': 'BTC-USD', 'yf_symbol': 'BTC-USD', 'session': 'NY', 'volatility': 0.03},
+    'GOLD': {'symbol': 'GC=F', 'yf_symbol': 'GC=F', 'session': 'London', 'volatility': 0.008},
 }
 
 # Trading Sessions (UTC+3 Haifa timezone)
@@ -83,39 +83,69 @@ class Signal:
     rr_ratio: str = "1:2"
 
 
-class TradingViewAPI:
-    """TradingView API wrapper for fetching market data"""
+class MarketDataAPI:
+    """Market data API wrapper using yfinance for fetching real market data"""
 
-    def __init__(self, session_id: str):
-        self.session_id = session_id
-        self.headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Cookie': f'sessionid={session_id}',
-        }
+    def __init__(self):
+        self.cache = {}
+        self.cache_time = {}
+        self.cache_duration = 300  # 5 minutes
 
-    async def fetch_ohlcv(self, symbol: str, timeframe: str, limit: int = 50) -> List[OHLCV]:
+    async def fetch_ohlcv(self, pair_name: str, pair_config: Dict, timeframe: str = '1h', limit: int = 50) -> List[OHLCV]:
         """
-        Fetch OHLCV data from TradingView
+        Fetch OHLCV data from yfinance
 
         Args:
-            symbol: Trading pair (e.g., 'GER40', 'EURUSD')
-            timeframe: Timeframe (1M, 5M, 1H, 4H, D)
+            pair_name: Trading pair name (e.g., 'DAX', 'EURUSD')
+            pair_config: Configuration dict with yf_symbol
+            timeframe: Timeframe (1m, 5m, 1h, 1d)
             limit: Number of candles to fetch
 
         Returns:
             List of OHLCV data points
         """
         try:
-            # Note: Full TradingView API implementation requires tvdatafeeds
-            # For production, use: pip install tvdatafeeds
-            logger.info(f"Fetching {symbol} {timeframe} ({limit} candles)")
+            yf_symbol = pair_config.get('yf_symbol')
+            logger.info(f"Fetching {pair_name} ({yf_symbol}) {timeframe} ({limit} candles)")
 
-            # In production environment, this would fetch real data
-            # For now, returning mock data for testing
-            return []
+            # Check cache
+            cache_key = f"{yf_symbol}_{timeframe}"
+            now = datetime.now()
+            if cache_key in self.cache_time:
+                if (now - self.cache_time[cache_key]).total_seconds() < self.cache_duration:
+                    logger.info(f"Using cached data for {cache_key}")
+                    return self.cache[cache_key]
+
+            # Download data from yfinance
+            ticker = yf.Ticker(yf_symbol)
+            df = ticker.history(period="5d", interval=timeframe)
+
+            if df.empty:
+                logger.warning(f"No data fetched for {yf_symbol}")
+                return []
+
+            # Convert to OHLCV objects
+            ohlcv_list = []
+            for idx, row in df.tail(limit).iterrows():
+                ohlcv = OHLCV(
+                    timestamp=idx.to_pydatetime(),
+                    open=float(row['Open']),
+                    high=float(row['High']),
+                    low=float(row['Low']),
+                    close=float(row['Close']),
+                    volume=int(row['Volume'])
+                )
+                ohlcv_list.append(ohlcv)
+
+            # Cache the result
+            self.cache[cache_key] = ohlcv_list
+            self.cache_time[cache_key] = now
+
+            logger.info(f"✅ Fetched {len(ohlcv_list)} candles for {pair_name}")
+            return ohlcv_list
 
         except Exception as e:
-            logger.error(f"Error fetching {symbol} {timeframe}: {e}")
+            logger.error(f"Error fetching {pair_name} ({pair_config.get('yf_symbol')}): {e}")
             return []
 
 
@@ -309,31 +339,29 @@ Let's make profitable trades! 💰
 
     async def analysis_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show market analysis"""
-        analysis_text = """
-**📊 Market Analysis**
+        api = MarketDataAPI()
+        analysis_text = "**📊 Market Analysis**\n\n"
 
-**GER40/DAX** (Frankfurt Session)
-⏰ Status: Checking...
-📈 Trend: Awaiting data
-MA9 vs MA21: Calculating...
+        for pair_name, config in TRADING_PAIRS.items():
+            ohlcv_data = await api.fetch_ohlcv(pair_name, config, timeframe='1h', limit=21)
 
-**EURUSD** (London Session)
-⏰ Status: Checking...
-📈 Trend: Awaiting data
-MA9 vs MA21: Calculating...
+            if ohlcv_data and len(ohlcv_data) >= 21:
+                closes = [c.close for c in ohlcv_data[-21:]]
+                ma9 = np.mean(closes[-9:])
+                ma21 = np.mean(closes[-21:])
+                current = closes[-1]
+                trend = "📈 Uptrend" if current > ma9 > ma21 else ("📉 Downtrend" if current < ma9 < ma21 else "➡️ Sideways")
 
-**BTCUSDT** (NY Session)
-⏰ Status: Checking...
-📈 Trend: Awaiting data
-MA9 vs MA21: Calculating...
+                analysis_text += f"""**{pair_name}** ({config['session']})
+Price: `{current:.5f}`
+MA9: `{ma9:.5f}` | MA21: `{ma21:.5f}`
+Trend: {trend}
 
-**XAUUSD** (London Session)
-⏰ Status: Checking...
-📈 Trend: Awaiting data
-MA9 vs MA21: Calculating...
+"""
+            else:
+                analysis_text += f"**{pair_name}**: ⏳ Loading data...\n\n"
 
-🔄 Updating every 5 minutes...
-        """
+        analysis_text += "🔄 Updating every 5 minutes..."
 
         keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data="menu")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -494,7 +522,7 @@ class KorchTradingBot:
     """Main bot orchestrator"""
 
     def __init__(self):
-        self.api = TradingViewAPI(TRADINGVIEW_SESSION_ID)
+        self.api = MarketDataAPI()
         self.strategy = StrategyAnalyzer()
         self.telegram = TelegramBot(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
         self.is_running = False
@@ -502,15 +530,16 @@ class KorchTradingBot:
     async def analyze_pair(self, pair_name: str, pair_config: Dict) -> Optional[Signal]:
         """Analyze single trading pair"""
         try:
-            # Fetch OHLCV data
-            ohlcv_1h = await self.api.fetch_ohlcv(pair_name, '1H', limit=50)
-            ohlcv_5m = await self.api.fetch_ohlcv(pair_name, '5M', limit=100)
+            # Fetch OHLCV data for 1H and 1M (yfinance doesn't have 5M, use 1M as 5M substitute)
+            ohlcv_1h = await self.api.fetch_ohlcv(pair_name, pair_config, timeframe='1h', limit=50)
+            ohlcv_5m = await self.api.fetch_ohlcv(pair_name, pair_config, timeframe='1m', limit=100)
 
-            if not ohlcv_1h or not ohlcv_5m:
+            if not ohlcv_1h or len(ohlcv_1h) < 21:
+                logger.info(f"Insufficient data for {pair_name}")
                 return None
 
-            # AMD detection
-            amd_setup = self.strategy.detect_amd(ohlcv_1h, ohlcv_5m)
+            # AMD detection (only on 1H if sufficient data)
+            amd_setup = self.strategy.detect_amd(ohlcv_1h, ohlcv_5m if ohlcv_5m else ohlcv_1h)
 
             if not amd_setup:
                 return None
@@ -528,7 +557,7 @@ class KorchTradingBot:
                 entry=amd_setup['entry_level'],
                 stop_loss=sl_tp['sl'],
                 take_profit=sl_tp['tp'],
-                timeframe='1H+5M',
+                timeframe='1H+1M',
                 confidence=amd_setup['confidence'],
                 reason=amd_setup['reason'],
                 pips=sl_tp['sl_pips'],
