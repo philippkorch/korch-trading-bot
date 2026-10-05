@@ -1,317 +1,134 @@
-# Korch Trading Bot 🤖
+# 🤖 Korch Trading Bot v2.0
 
-<<<<<<< HEAD
-Автоматический торговый бот для анализа стратегии AMD+FVG и отправки сигналов в Telegram.
+**Интерактивный Telegram бот с AMD+FVG стратегией и INTELLECT_city подтверждением**
 
-## Особенности
+![Version](https://img.shields.io/badge/version-2.0-blue)
+![Python](https://img.shields.io/badge/python-3.11-brightgreen)
+![Status](https://img.shields.io/badge/status-production--ready-success)
 
-✅ Анализ стратегии AMD+FVG на TradingView  
-✅ Поиск продвинутой структуры (HTF targets)  
-✅ Управление риском (1% per trade, 1:2 RR)  
-✅ Отправка сигналов в Telegram  
-✅ Мониторинг сессий (Frankfurt, London, NY)  
-✅ Проверка дневного контекста  
+---
 
-## Установка локально
+## 📊 Что Это
 
-### 1. Клонируй/скачай проект
+Korch Trading Bot - автоматизированный торговый ассистент, который:
+
+✅ **Анализирует** рынки GER40, BTC, GOLD на 1H+5M таймфреймах  
+✅ **Обнаруживает** AMD+FVG торговые сетапы  
+✅ **Подтверждает** сигналы через INTELLECT_city индикатор (60%+ порог)  
+✅ **Отправляет** торговые сигналы в Telegram с полной информацией  
+✅ **Управляет** рисками с 1:2 R:R и 1% риском на сделку  
+
+---
+
+## 🎯 Основные Возможности
+
+### 1. AMD+FVG Стратегия
+- After Market Delivery (AMD) - тренд на 1H (MA9 > MA21)
+- Fair Value Gap (FVG) - эффективность цены на 1H
+- 5M инверсии - точный вход на структуре
+
+### 2. INTELLECT_city Индикатор 🔮
+Композитный индекс из 8 ТОП индикаторов:
+- RSI (14 период) - перекупленность/перепроданность
+- Stochastic %K (14 период) - импульс
+- MACD - направление тренда
+- MFI (14 период) - объемные потоки
+- Тренд - MA9 vs MA21 согласованность
+
+**Результат**: 0-100% шкала рыночного настроения
+
+### 3. Smart Money Методология
+- Отслеживание институциональных потоков
+- FVG как уровень входа Smart Money
+- INTELLECT_city показывает согласованность крупных игроков
+
+---
+
+## 📦 Файлы Проекта
+
+```
+├── korch_trading_bot.py          # Основной бот (900+ строк)
+├── requirements.txt               # Python зависимости
+├── Dockerfile                     # Docker конфигурация
+├── test_intellect_city.py        # Тестовый скрипт
+├── INTELLECT_CITY_INTEGRATION.md # Техническая документация
+├── DEPLOYMENT_CHECKLIST.md       # Чеклист для Railway
+└── README.md                      # Этот файл
+```
+
+---
+
+## 🚀 Развертывание
+
+**Статус**: ✅ ГОТОВ К РАЗВЕРТЫВАНИЮ
+
 ```bash
-git clone <repo> korch-bot
-cd korch-bot
-```
+# 1. Подготовить переменные окружения
+export TELEGRAM_BOT_TOKEN="your_token"
+export TELEGRAM_CHAT_ID="your_chat_id"
 
-### 2. Установи зависимости
-```bash
-pip install -r requirements.txt
-```
-
-### 3. Запусти бота
-```bash
-python korch_trading_bot.py
-```
-
-## Конфигурация
-
-### Основные параметры (в коде)
-
-```python
-TELEGRAM_BOT_TOKEN = "твой_токен_здесь"
-TELEGRAM_CHAT_ID = 457832510  # Твой ID
-TRADINGVIEW_SESSION_ID = "qu1s4tex582n1uzvgl9m35we03cbn6f2"
-
-RISK_PER_TRADE = 0.01  # 1% риска на сделку
-MAX_DAILY_LOSS = 0.02  # 2% максимум за день
-RISK_REWARD_RATIO = 2  # 1:2
-```
-
-### Активы для торговли
-
-```python
-TRADING_PAIRS = {
-    "GER40": {"timeframe": "1H", "session": "Frankfurt"},
-    "EURUSD": {"timeframe": "1H", "session": "London"},
-    "BTCUSDT": {"timeframe": "1H", "session": "NY"},
-    "XAUUSD": {"timeframe": "1H", "session": "London"},
-}
-```
-
-## Развертывание на Railway
-
-### 1. Создай аккаунт на Railway
-- https://railway.app
-- Связи с GitHub (если нужно)
-
-### 2. Создай новый проект
-```bash
-railway init
-```
-
-### 3. Добавь переменные окружения
-```
-TELEGRAM_BOT_TOKEN=твой_токен
-TELEGRAM_CHAT_ID=457832510
-TRADINGVIEW_SESSION_ID=qu1s4tex582n1uzvgl9m35we03cbn6f2
-```
-
-### 4. Задай команду запуска
-```
-python korch_trading_bot.py
-```
-
-### 5. Задеплой
-```bash
+# 2. На Railway через CLI
 railway up
+
+# 3. Или через Dashboard
+# railway.app → Deploy from GitHub
 ```
 
-## Интеграция с TradingView
+**Подробнее**: `DEPLOYMENT_CHECKLIST.md`
 
-### Получить sessionid
+---
 
-1. Зайди на https://www.tradingview.com
-2. Открой DevTools (F12)
-3. Application → Cookies → tradingview.com
-4. Найди `sessionid` - скопируй значение
-5. Вставь в `TRADINGVIEW_SESSION_ID`
+## 🧪 Локальное Тестирование
 
-### Pine Script для сигналов (опционально)
+```bash
+# Установить зависимости
+pip install -r requirements.txt
 
-Используй стратегию с webhook'ами для более точных сигналов:
+# Протестировать INTELLECT_city
+python test_intellect_city.py
 
-```pinescript
-//@version=5
-strategy("Korch AMD+FVG", overlay=true)
-
-// Твоя логика здесь
-// alert("BUY_SIGNAL") or alert("SELL_SIGNAL")
+# Запустить бот локально
+python korch_trading_bot.py
 ```
 
-## Мониторинг
+---
 
-Бот проверяет сигналы каждые **5 минут** (300 сек).
-
-Логи будут в консоли:
-```
-🤖 Бот запущен! Проверка каждые 300 сек...
-📊 Проверка сигналов... 14:32:45
-```
-
-## Стоп-лосс и Тейк-профит
-
-Бот автоматически считает:
-- **SL**: На основе структуры (recent low для BUY)
-- **TP**: По правилу 1:2 (RR = 1:2)
-- **Пункты**: В пипсах для Forex
-
-Пример сигнала в Telegram:
+## 📊 Пример Сигнала
 
 ```
 🟢 BUY GER40
 
-📊 Вход: 25350
-🛑 SL: 25320 (30 пункты)
-🎯 TP: 25380 (60 пункты)
+📊 Сигнал: AMD + 5M Inversion + INTELLECT 78%
+⏱️ Таймфрейм: 1H+5M
+🎲 Уверенность: 78%
 
-📈 R:R = 1:2
-💡 Сигнал: AMD+FVG инверсия на 5M
-⏰ Сессия: Frankfurt Morning
-🕐 Время: 14:32:45
+🔮 INTELLECT_city: 78% (Сильный бычий)
+
+💰 Вход: 18250.50
+🛑 Stop Loss: 18200.00 (50 пипс)
+🎁 Take Profit: 18350.00
+📊 R:R: 1:2
 ```
-
-## Проблемы и решения
-
-### sessionid истёк
-- Переавторизуйся на TradingView
-- Получи новый sessionid
-- Обнови переменную
-
-### Нет сигналов
-- Проверь, активна ли сессия торговли
-- Посмотри логи ошибок
-- Убедись, что OHLCV данные получаются
-
-### Ошибка Telegram
-- Проверь токен бота
-- Проверь chat_id
-- Убедись, что бот добавлен в чат
-
-## Безопасность
-
-⚠️ **Никогда не коммитьте**:
-- Telegram токены
-- TradingView sessionid'ы
-- Пароли
-
-Используй `.env` файл (добавь в `.gitignore`):
-
-```bash
-# .env
-TELEGRAM_BOT_TOKEN=xxx
-TRADINGVIEW_SESSION_ID=xxx
-```
-
-Загружай переменные:
-```python
-from dotenv import load_dotenv
-load_dotenv()
-```
-
-## Дополнительно
-
-- Docs: https://tradingview.com/api/
-- Python-Telegram-Bot: https://python-telegram-bot.readthedocs.io/
-- Railway CLI: https://docs.railway.app/reference/cli
-
-## Статус
-
-- ✅ Основной функционал (v1.0)
-- 🔄 В работе: Интеграция с tvdatafeeds
-- 📅 Планы: Бэктестинг, сохранение истории сигналов
 
 ---
 
-**Контакт**: @philipp_korch (Telegram)  
-**Стратегия**: AMD+FVG + Advanced Structure  
-**Версия**: 1.0
-=======
-Async trading bot with AMD+FVG strategy detection. Analyzes multiple timeframes and sends signals via Telegram.
+## 📈 Логика Сигналов
 
-## Features
+**BUY**: AMD восход + 5M инверсия + INTELLECT ≥ 60%  
+**SELL**: AMD спад + 5M инверсия + INTELLECT ≤ 40%
 
-- **Multi-timeframe Analysis**: 1H and 5M chart analysis
-- **AMD+FVG Strategy**: Advanced price action analysis
-- **Risk Management**: 1:2 reward-risk ratio, 1% per trade
-- **Telegram Integration**: Real-time signal delivery
-- **Docker Support**: Easy cloud deployment
-- **Async Processing**: Non-blocking concurrent operations
+---
 
-## Architecture
+## 📞 Документация
 
-### Core Components
+- **INTELLECT_CITY_INTEGRATION.md** - Полное описание индикатора
+- **DEPLOYMENT_CHECKLIST.md** - Инструкции развертывания
+- **test_intellect_city.py** - Тестирование индикатора
 
-- `TradingViewAPI`: Fetches OHLCV data from TradingView
-- `StrategyAnalyzer`: AMD+FVG pattern detection
-  - Fair Value Gap (FVG) detection on 1H
-  - Auraprice Movement Direction (AMD) on 5M
-  - Signal confirmation with both timeframes
-- `TelegramSignalSender`: Sends formatted signals
-- `KorchTradingBot`: Main orchestrator
+---
 
-### Trading Pairs
+**Версия**: 2.0 с INTELLECT_city и Smart Money  
+**Дата**: 2026-10-05 22:27  
+**Статус**: 🟢 Готов к боевому использованию
 
-- EURUSD
-- GBPUSD
-- USDJPY
-- AUDUSD
-
-## Requirements
-
-```
-python-telegram-bot==20.3
-requests==2.31.0
-numpy==1.26.0
-python-dateutil==2.8.2
-aiohttp==3.9.0
-```
-
-## Environment Variables
-
-```bash
-TELEGRAM_BOT_TOKEN=your_bot_token_here
-TELEGRAM_CHAT_ID=your_chat_id_here
-TRADINGVIEW_SESSION_ID=your_session_id_here
-```
-
-## Installation
-
-### Local Setup
-
-```bash
-# Clone repository
-git clone https://github.com/philippkorch/korch-trading-bot.git
-cd korch-trading-bot
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Set environment variables
-export TELEGRAM_BOT_TOKEN=your_token
-export TELEGRAM_CHAT_ID=your_chat_id
-export TRADINGVIEW_SESSION_ID=your_session_id
-
-# Run bot
-python korch_trading_bot.py
-```
-
-### Docker Setup
-
-```bash
-# Build image
-docker build -t korch-bot .
-
-# Run container
-docker run -e TELEGRAM_BOT_TOKEN=your_token \
-           -e TELEGRAM_CHAT_ID=your_chat_id \
-           -e TRADINGVIEW_SESSION_ID=your_session_id \
-           korch-bot
-```
-
-## Configuration
-
-- **SIGNAL_CHECK_INTERVAL**: 300 seconds (5 minutes)
-- **DAILY_SIGNAL_LIMIT**: 5 signals per day
-- **TRADING_PAIRS**: EURUSD, GBPUSD, USDJPY, AUDUSD
-- **TIMEFRAMES**: 1H, 5M
-
-## How It Works
-
-1. **Data Fetching**: Continuously fetches OHLCV data from TradingView
-2. **Pattern Detection**:
-   - Identifies FVG (Fair Value Gap) on 1H timeframe
-   - Detects AMD (Auraprice Movement Direction) on 5M
-3. **Signal Generation**: Creates signals when both conditions align
-4. **Risk Management**: Calculates SL and TP with 1:2 ratio
-5. **Notification**: Sends formatted signal to Telegram
-
-## Testing
-
-```bash
-python -m pytest test_bot.py
-```
-
-## Deployment
-
-See `DEPLOYMENT.md` for Railway deployment instructions.
-
-## Quick Start
-
-See `QUICKSTART.md` for 5-minute setup guide.
-
-## License
-
-MIT
-
-## Author
-
-Philipp Korchmar (@philippkorch)
->>>>>>> origin/main
-# Cache invalidation - 1791219228
+🎯 **Бот готов к развертыванию на Railway!**

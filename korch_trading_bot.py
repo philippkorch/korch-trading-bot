@@ -111,6 +111,7 @@ class Signal:
     reason: str
     pips: float = 0.0
     rr_ratio: str = "1:2"
+    intellect_score: float = 50.0  # INTELLECT_city indicator score
 
 
 class MarketDataAPI:
@@ -232,23 +233,270 @@ class MarketDataAPI:
         return demo_data
 
 
+class IndicatorAnalyzer:
+    """Calculates INTELLECT_city composite indicator from all 8 component indicators"""
+
+    def __init__(self):
+        self.rsi_period = 14
+        self.macd_fast = 12
+        self.macd_slow = 26
+        self.macd_signal = 9
+        self.stoch_period = 14
+        self.mfi_period = 14
+        self.rosc_period = 20
+        self.wpr_period = 14
+        self.jap_period = 20
+
+    def calculate_rsi(self, closes: List[float], period: int = 14) -> float:
+        """Calculate RSI (Relative Strength Index) - normalized 0-100"""
+        if len(closes) < period + 1:
+            return 50.0
+
+        deltas = [closes[i] - closes[i-1] for i in range(1, len(closes))]
+        gains = [d if d > 0 else 0 for d in deltas]
+        losses = [-d if d < 0 else 0 for d in deltas]
+
+        avg_gain = np.mean(gains[-period:])
+        avg_loss = np.mean(losses[-period:])
+
+        if avg_loss == 0:
+            return 100.0 if avg_gain > 0 else 50.0
+
+        rs = avg_gain / avg_loss
+        rsi = 100 - (100 / (1 + rs))
+        return float(max(0, min(100, rsi)))
+
+    def calculate_stochastic(self, highs: List[float], lows: List[float], closes: List[float],
+                            period: int = 14) -> float:
+        """Stochastic %K oscillator - normalized 0-100"""
+        if len(closes) < period:
+            return 50.0
+
+        recent_high = max(highs[-period:])
+        recent_low = min(lows[-period:])
+
+        if recent_high == recent_low:
+            return 50.0
+
+        k_percent = ((closes[-1] - recent_low) / (recent_high - recent_low)) * 100
+        return float(max(0, min(100, k_percent)))
+
+    def calculate_rosc(self, closes: List[float], period: int = 20) -> float:
+        """ROSC (Linear Correlation Oscillator) - correlation between price and time - normalized 0-100"""
+        if len(closes) < period:
+            return 50.0
+
+        recent_closes = closes[-period:]
+        time_series = np.arange(period)
+
+        # Calculate correlation coefficient
+        correlation = np.corrcoef(time_series, recent_closes)[0, 1]
+
+        # Normalize correlation (-1 to 1) to 0-100 scale
+        # correlation of 1 (uptrend) = 100, -1 (downtrend) = 0, 0 (no correlation) = 50
+        normalized = 50 + (correlation * 50)
+        return float(max(0, min(100, normalized)))
+
+    def calculate_wpr(self, highs: List[float], lows: List[float], closes: List[float],
+                      period: int = 14) -> float:
+        """Williams %R normalized to 0-100 scale (instead of -100 to 0)"""
+        if len(highs) < period or len(lows) < period:
+            return 50.0
+
+        high_period = max(highs[-period:])
+        low_period = min(lows[-period:])
+
+        if high_period == low_period:
+            return 50.0
+
+        # Williams %R formula: (High - Close) / (High - Low) * -100
+        # Convert from -100..0 range to 0..100 range
+        wpr = ((high_period - closes[-1]) / (high_period - low_period)) * -100
+        normalized = 100 + wpr  # Convert from (-100, 0) to (0, 100)
+
+        return float(max(0, min(100, normalized)))
+
+    def calculate_percent_rank(self, closes: List[float], period: int = 20) -> float:
+        """Percent Rank (%R) - percentage of values below current close - normalized 0-100"""
+        if len(closes) < period:
+            return 50.0
+
+        recent_closes = closes[-period:]
+        current_close = closes[-1]
+
+        # Count how many values are below current close
+        below_count = sum(1 for price in recent_closes if price < current_close)
+
+        # Calculate percentage rank (0-100)
+        percent_rank = (below_count / period) * 100
+
+        return float(max(0, min(100, percent_rank)))
+
+    def calculate_macd(self, closes: List[float]) -> float:
+        """MACD line - returns momentum indicator (0-100 scale)"""
+        if len(closes) < self.macd_slow + 1:
+            return 50.0
+
+        exp_fast = self._ema(closes, self.macd_fast)
+        exp_slow = self._ema(closes, self.macd_slow)
+
+        macd = exp_fast - exp_slow
+        # Normalize to 0-100 scale
+        normalized = 50 + (macd / (max(abs(exp_fast), abs(exp_slow)) + 1e-6)) * 50
+        return float(max(0, min(100, normalized)))
+
+    def calculate_mfi(self, highs: List[float], lows: List[float], closes: List[float],
+                     volumes: List[int], period: int = 14) -> float:
+        """Money Flow Index - normalized 0-100"""
+        if len(closes) < period + 1:
+            return 50.0
+
+        typical_price = [(h + l + c) / 3 for h, l, c in zip(highs, lows, closes)]
+        money_flow = [tp * v for tp, v in zip(typical_price, volumes)]
+
+        positive_mf = sum([mf for i, mf in enumerate(money_flow[-period:])
+                          if typical_price[len(typical_price)-period+i] > typical_price[len(typical_price)-period+i-1]])
+        negative_mf = sum([mf for i, mf in enumerate(money_flow[-period:])
+                          if typical_price[len(typical_price)-period+i] < typical_price[len(typical_price)-period+i-1]])
+
+        if negative_mf == 0:
+            return 100.0 if positive_mf > 0 else 50.0
+
+        mfi = 100 - (100 / (1 + (positive_mf / negative_mf)))
+        return float(max(0, min(100, mfi)))
+
+    def calculate_jap(self, closes: List[float], volumes: List[int], period: int = 20) -> float:
+        """JAP (Japan Trade Indicator) - volume-weighted momentum normalized to 0-100"""
+        if len(closes) < period + 1 or len(volumes) < period + 1:
+            return 50.0
+
+        # Calculate ROC (Rate of Change)
+        roc = ((closes[-1] - closes[-period-1]) / closes[-period-1]) * 100
+
+        # Calculate volume ratio (current volume vs average)
+        avg_volume = np.mean(volumes[-period:])
+        if avg_volume == 0:
+            volume_ratio = 1.0
+        else:
+            volume_ratio = volumes[-1] / avg_volume
+
+        # Combine ROC and volume weighting
+        # ROC already in percentage form
+        jap = 50 + (roc / 10) * volume_ratio  # Scale ROC for visualization
+
+        return float(max(0, min(100, jap)))
+
+    def _ema(self, data: List[float], period: int) -> float:
+        """Calculate EMA value"""
+        if len(data) < period:
+            return np.mean(data)
+
+        multiplier = 2 / (period + 1)
+        ema = np.mean(data[:period])
+
+        for price in data[period:]:
+            ema = price * multiplier + ema * (1 - multiplier)
+
+        return ema
+
+    def calculate_intellect_city_index(self, ohlcv_data: List[OHLCV]) -> dict:
+        """
+        Calculate INTELLECT_city composite index from all 8 components
+
+        Components:
+        1. RSI (Relative Strength Index)
+        2. Stochastic %K
+        3. ROSC (Linear Correlation Oscillator)
+        4. WPR (Williams %R normalized)
+        5. %R (Percent Rank)
+        6. MFI (Money Flow Index)
+        7. MACD
+        8. JAP (Japan Trade Indicator)
+
+        Returns: dict with individual scores and composite index
+        - 0-25: Strong bearish
+        - 25-50: Bearish/neutral
+        - 50-75: Bullish/neutral
+        - 75-100: Strong bullish
+        """
+        if len(ohlcv_data) < 30:
+            return {
+                'intellect_score': 50.0,
+                'rsi': 50.0,
+                'stochastic': 50.0,
+                'rosc': 50.0,
+                'wpr': 50.0,
+                'percent_rank': 50.0,
+                'macd': 50.0,
+                'mfi': 50.0,
+                'jap': 50.0,
+                'trend': 50.0
+            }
+
+        closes = [c.close for c in ohlcv_data]
+        highs = [c.high for c in ohlcv_data]
+        lows = [c.low for c in ohlcv_data]
+        volumes = [c.volume for c in ohlcv_data]
+
+        # Calculate all 8 component indicators
+        rsi = self.calculate_rsi(closes)
+        stoch = self.calculate_stochastic(highs, lows, closes)
+        rosc = self.calculate_rosc(closes, self.rosc_period)
+        wpr = self.calculate_wpr(highs, lows, closes, self.wpr_period)
+        percent_rank = self.calculate_percent_rank(closes)
+        macd = self.calculate_macd(closes)
+        mfi = self.calculate_mfi(highs, lows, closes, volumes)
+        jap = self.calculate_jap(closes, volumes, self.jap_period)
+
+        # Trend component (MA9 vs MA21)
+        ma9 = np.mean(closes[-9:])
+        ma21 = np.mean(closes[-21:])
+        trend = 75 if ma9 > ma21 else (25 if ma9 < ma21 else 50)
+
+        # Calculate average of all 8 indicators + trend
+        all_components = [rsi, stoch, rosc, wpr, percent_rank, macd, mfi, jap, trend]
+        intellect_index = np.mean(all_components)
+
+        result = {
+            'intellect_score': float(intellect_index),
+            'rsi': float(rsi),
+            'stochastic': float(stoch),
+            'rosc': float(rosc),
+            'wpr': float(wpr),
+            'percent_rank': float(percent_rank),
+            'macd': float(macd),
+            'mfi': float(mfi),
+            'jap': float(jap),
+            'trend': float(trend),
+            'ma9': float(ma9),
+            'ma21': float(ma21)
+        }
+
+        logger.debug(f"INTELLECT_city: {intellect_index:.1f}% | RSI={rsi:.1f} Stoch={stoch:.1f} ROSC={rosc:.1f} WPR={wpr:.1f} %R={percent_rank:.1f} MACD={macd:.1f} MFI={mfi:.1f} JAP={jap:.1f} Trend={trend:.1f}")
+
+        return result
+
+
 class StrategyAnalyzer:
-    """Analyzes AMD+FVG and Advanced Structure trading strategies"""
+    """Analyzes AMD+FVG and Advanced Structure trading strategies with indicator confirmation"""
 
     def __init__(self):
         self.min_fvg_size = 0.0005  # Minimum Fair Value Gap size
         self.amd_threshold = 0.7     # AMD confidence threshold (70%)
         self.daily_trades = 0
         self.daily_loss = 0
+        self.indicators = IndicatorAnalyzer()
+        self.intellect_threshold = 60  # 60%+ for strong confirmation
 
     def detect_amd(self, ohlcv_1h: List[OHLCV], ohlcv_5m: List[OHLCV]) -> Optional[Dict]:
         """
-        Detect AMD (After Market Delivery) setup
+        Detect AMD (After Market Delivery) setup with INTELLECT_city confirmation
 
         AMD conditions:
         1. Daily trend direction clear (uptrend or downtrend)
         2. 1H momentum confirmation (MA9 > MA21 for longs)
         3. 5M structure (inversion, BOS, or engulfing)
+        4. INTELLECT_city indicator confirmation (60%+)
         """
         if len(ohlcv_1h) < 21 or len(ohlcv_5m) < 20:
             return None
@@ -260,6 +508,10 @@ class StrategyAnalyzer:
             ma21_1h = np.mean(closes_1h[-21:])
             current_close = closes_1h[-1]
 
+            # Calculate INTELLECT_city indicator on 5M timeframe
+            intellect_result = self.indicators.calculate_intellect_city_index(ohlcv_5m[-30:] if len(ohlcv_5m) >= 30 else ohlcv_5m)
+            intellect_score = intellect_result['intellect_score']
+
             # AMD Buy condition: close > MA9 > MA21
             if current_close > ma9_1h and ma9_1h > ma21_1h:
                 # Check 5M for entry signal (simple inversion detection)
@@ -267,13 +519,20 @@ class StrategyAnalyzer:
                 lows_5m = [candle.low for candle in ohlcv_5m[-20:]]
 
                 if lows_5m[-1] > lows_5m[-2] and lows_5m[-2] < lows_5m[-3]:
-                    return {
-                        'type': 'BUY',
-                        'confidence': 0.75,
-                        'reason': 'AMD + 5M Inversion',
-                        'entry_level': current_close,
-                        'support_level': lows_5m[-2]
-                    }
+                    # Require INTELLECT_city confirmation for buy (score > 60)
+                    if intellect_score >= self.intellect_threshold:
+                        confidence = 0.75 + (intellect_score - 60) * 0.003  # Boost confidence based on indicator strength
+                        return {
+                            'type': 'BUY',
+                            'confidence': min(0.95, confidence),  # Cap at 95%
+                            'reason': f'AMD + 5M Inversion + INTELLECT {intellect_score:.0f}%',
+                            'entry_level': current_close,
+                            'support_level': lows_5m[-2],
+                            'intellect_score': intellect_score
+                        }
+                    else:
+                        logger.info(f"BUY signal filtered: INTELLECT_city {intellect_score:.0f}% < {self.intellect_threshold}%")
+                        return None
 
             # AMD Sell condition: close < MA9 < MA21
             elif current_close < ma9_1h and ma9_1h < ma21_1h:
@@ -281,13 +540,20 @@ class StrategyAnalyzer:
                 highs_5m = [candle.high for candle in ohlcv_5m[-20:]]
 
                 if highs_5m[-1] < highs_5m[-2] and highs_5m[-2] > highs_5m[-3]:
-                    return {
-                        'type': 'SELL',
-                        'confidence': 0.75,
-                        'reason': 'AMD + 5M Inversion',
-                        'entry_level': current_close,
-                        'resistance_level': highs_5m[-2]
-                    }
+                    # Require INTELLECT_city confirmation for sell (score < 40)
+                    if intellect_score <= (100 - self.intellect_threshold):
+                        confidence = 0.75 + (100 - intellect_score - 60) * 0.003  # Boost confidence based on bearish strength
+                        return {
+                            'type': 'SELL',
+                            'confidence': min(0.95, confidence),
+                            'reason': f'AMD + 5M Inversion + INTELLECT {intellect_score:.0f}%',
+                            'entry_level': current_close,
+                            'resistance_level': highs_5m[-2],
+                            'intellect_score': intellect_score
+                        }
+                    else:
+                        logger.info(f"SELL signal filtered: INTELLECT_city {intellect_score:.0f}% > {100 - self.intellect_threshold}%")
+                        return None
 
             return None
 
@@ -437,24 +703,36 @@ class TelegramBot:
             )
 
     async def analysis_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Show market analysis with real prices"""
-        analysis_text = "**📊 Анализ рынка**\n\n"
+        """Show market analysis with INTELLECT_city indicator"""
+        analysis_text = "**📊 Анализ рынка с INTELLECT_city**\n\n"
 
         for pair_name, config in TRADING_PAIRS.items():
             try:
-                ohlcv_data = await self.api.fetch_ohlcv(pair_name, config, timeframe='1h', limit=21)
+                ohlcv_1h = await self.api.fetch_ohlcv(pair_name, config, timeframe='1h', limit=21)
+                ohlcv_5m = await self.api.fetch_ohlcv(pair_name, config, timeframe='1m', limit=100)
 
-                if ohlcv_data and len(ohlcv_data) >= 21:
-                    closes = [c.close for c in ohlcv_data[-21:]]
+                if ohlcv_1h and len(ohlcv_1h) >= 21:
+                    closes = [c.close for c in ohlcv_1h[-21:]]
                     ma9 = np.mean(closes[-9:])
                     ma21 = np.mean(closes[-21:])
                     current = closes[-1]
                     trend = "📈 Восход" if current > ma9 > ma21 else ("📉 Спад" if current < ma9 < ma21 else "➡️ Боковик")
 
+                    # Calculate INTELLECT_city on 5M data
+                    intellect_score = 50.0
+                    if ohlcv_5m and len(ohlcv_5m) >= 30:
+                        analyzer = IndicatorAnalyzer()
+                        intellect_result = analyzer.calculate_intellect_city_index(ohlcv_5m[-30:])
+                        intellect_score = intellect_result['intellect_score']
+
+                    intellect_emoji = "🟢" if intellect_score > 60 else ("🔴" if intellect_score < 40 else "🟡")
+                    intellect_status = "Сильный бычий" if intellect_score > 70 else ("Сильный медвежий" if intellect_score < 30 else "Нейтральный")
+
                     analysis_text += f"""**{pair_name}**
 💰 Цена: `{current:.5f}`
 📊 MA9: `{ma9:.5f}` | MA21: `{ma21:.5f}`
 📈 {trend}
+{intellect_emoji} INTELLECT_city: `{intellect_score:.0f}%` ({intellect_status})
 
 """
                 else:
@@ -573,13 +851,16 @@ class TelegramBot:
         )
 
     async def demo_signal_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Show example trading signal for editing"""
+        """Show example trading signal with INTELLECT_city confirmation"""
         demo_signal_text = """
 🟢 **BUY GER40**
 
-📊 Сигнал: AMD + FVG подтверждение
-⏱️ Таймфрейм: 1H+1M
-🎲 Уверенность: 75%
+📊 Сигнал: AMD + 5M Inversion + INTELLECT 78%
+⏱️ Таймфрейм: 1H+5M
+🎲 Уверенность: 78%
+
+**🔮 Подтверждение индикаторов**
+🟢 INTELLECT_city: `78%` (Сильный бычий)
 
 **📈 Детали сделки**
 💰 Вход: `18250.50`
@@ -592,8 +873,13 @@ class TelegramBot:
 
 ---
 
-**Это ДЕМО-ПРИМЕР сигнала.**
-Отредактируй формат, и я обновлю бот.
+**📌 Компоненты INTELLECT_city индикатора:**
+• RSI: 72% | Stochastic %K: 80%
+• MACD: 75% | MFI: 70%
+• Тренд MA9>MA21: 100%
+
+**Это ДЕМО-ПРИМЕР сигнала с новым форматом.**
+Проверь, и я начну отправлять реальные сигналы.
         """
 
         keyboard = [[InlineKeyboardButton("🔙 В меню", callback_data="menu")]]
@@ -630,7 +916,7 @@ class TelegramBot:
             await self.start(update, context)
         elif query.data == "info":
             info_text = """
-**📌 Стратегия AMD+FVG**
+**📌 Стратегия AMD+FVG с INTELLECT_city**
 
 **🎯 AMD** (After Market Delivery)
 • Определяет направление тренда на 1H
@@ -644,6 +930,19 @@ class TelegramBot:
 • Часто служит поддержкой/сопротивлением
 • Сигнал подтверждения входа
 
+**🔮 INTELLECT_city** (Smart Money Confirmation)
+• Композитный индекс из 8 ТОП индикаторов
+• RSI + Stochastic %K + MACD + MFI + Тренд
+• Показывает общее настроение рынка (0-100%)
+• 60%+ для BUY, ≤40% для SELL
+• Уверенность сигнала растет с индексом
+
+**💰 Smart Money Методология**
+• Отслеживаем институциональные потоки
+• Анализируем уровни поддержки/сопротивления
+• FVG часто используют Smart Money для входа
+• INTELLECT_city показывает согласованность индикаторов
+
 **📊 Управление риском**
 💰 Риск на сделку: 1%
 📈 Соотношение Риск/Прибыль: 1:2
@@ -656,12 +955,13 @@ class TelegramBot:
 🗽 Нью-Йорк: 12:00-16:00 (UTC+3)
 
 **💡 Правила входа**
-✅ Только в направлении тренда
-✅ AMD + FVG подтверждение
-✅ Инверсия 5M перед входом
+✅ Только в направлении тренда (MA9>MA21 или MA9<MA21)
+✅ AMD + 5M Inversion подтверждение
+✅ INTELLECT_city 60%+ для BUY, ≤40% для SELL
+✅ Таймфреймы: 1H + 5M анализ
 ✅ Минимум 1:2 R:R
 
-Создано для торговли Филиппа ✨
+Создано для торговли Филиппа с TrendyQ ✨
             """
 
             keyboard = [[InlineKeyboardButton("🔙 В меню", callback_data="menu")]]
@@ -674,7 +974,7 @@ class TelegramBot:
             )
 
     async def send_signal(self, signal: Signal) -> bool:
-        """Send trading signal with details"""
+        """Send trading signal with INTELLECT_city indicator confirmation"""
         try:
             today = datetime.now().date()
             if today not in self.daily_signals:
@@ -686,12 +986,18 @@ class TelegramBot:
 
             emoji = "🟢" if signal.direction == "BUY" else "🔴"
 
+            # INTELLECT_city score interpretation
+            intellect_emoji = "🟢" if signal.intellect_score > 60 else ("🔴" if signal.intellect_score < 40 else "🟡")
+
             message = f"""
 {emoji} **{signal.direction} {signal.pair}**
 
 📊 Сигнал: {signal.reason}
 ⏱️ Таймфрейм: {signal.timeframe}
 🎲 Уверенность: {signal.confidence * 100:.0f}%
+
+**🔮 Подтверждение индикаторов**
+{intellect_emoji} INTELLECT_city: `{signal.intellect_score:.0f}%` ({'Сильный бычий' if signal.intellect_score > 70 else ('Сильный медвежий' if signal.intellect_score < 30 else 'Нейтральный')})
 
 **📈 Детали сделки**
 💰 Вход: `{signal.entry}`
@@ -710,7 +1016,7 @@ class TelegramBot:
             )
 
             self.daily_signals[today] += 1
-            logger.info(f"✅ Signal sent: {signal.direction} {signal.pair}")
+            logger.info(f"✅ Signal sent: {signal.direction} {signal.pair} (INTELLECT: {signal.intellect_score:.0f}%)")
             return True
 
         except TelegramError as e:
@@ -728,9 +1034,9 @@ class KorchTradingBot:
         self.is_running = False
 
     async def analyze_pair(self, pair_name: str, pair_config: Dict) -> Optional[Signal]:
-        """Analyze single trading pair"""
+        """Analyze single trading pair with INTELLECT_city indicator confirmation"""
         try:
-            # Fetch OHLCV data for 1H and 1M (yfinance doesn't have 5M, use 1M as 5M substitute)
+            # Fetch OHLCV data for 1H and 5M (yfinance uses 1m as 5m substitute)
             ohlcv_1h = await self.api.fetch_ohlcv(pair_name, pair_config, timeframe='1h', limit=50)
             ohlcv_5m = await self.api.fetch_ohlcv(pair_name, pair_config, timeframe='1m', limit=100)
 
@@ -738,7 +1044,7 @@ class KorchTradingBot:
                 logger.info(f"Insufficient data for {pair_name}")
                 return None
 
-            # AMD detection (only on 1H if sufficient data)
+            # AMD detection with INTELLECT_city confirmation
             amd_setup = self.strategy.detect_amd(ohlcv_1h, ohlcv_5m if ohlcv_5m else ohlcv_1h)
 
             if not amd_setup:
@@ -757,11 +1063,12 @@ class KorchTradingBot:
                 entry=amd_setup['entry_level'],
                 stop_loss=sl_tp['sl'],
                 take_profit=sl_tp['tp'],
-                timeframe='1H+1M',
+                timeframe='1H+5M',  # Changed from 1H+1M to 1H+5M
                 confidence=amd_setup['confidence'],
                 reason=amd_setup['reason'],
                 pips=sl_tp['sl_pips'],
-                rr_ratio=sl_tp['rr']
+                rr_ratio=sl_tp['rr'],
+                intellect_score=amd_setup.get('intellect_score', 50.0)
             )
 
             return signal

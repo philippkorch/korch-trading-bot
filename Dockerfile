@@ -16,8 +16,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy bot files
 COPY . .
 
-# Cache invalidation - force rebuild (2026-10-05 21:26)
-RUN echo "Force full rebuild with correct dependencies and Russian bot UI"
+# Cache invalidation - force rebuild with FULL 8-COMPONENT INTELLECT_city integration (2026-10-05 23:45)
+RUN echo "Build v2.1 with ALL 8 INTELLECT_city components: RSI, Stochastic, ROSC, WPR, %R, MACD, MFI, JAP"
 
 # Run bot
 CMD ["python", "korch_trading_bot.py"]
