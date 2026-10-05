@@ -37,12 +37,38 @@ RISK_PER_TRADE = 0.01  # 1% per trade
 MAX_DAILY_LOSS = 0.02  # 2% max daily loss
 RISK_REWARD_RATIO = 2  # 1:2 R:R
 
-# Trading Pairs (Philipp's primary focus)
+# Trading Pairs (Philipp's primary focus - EURUSD removed)
 TRADING_PAIRS = {
     'DAX': {'symbol': '^GDAXI', 'yf_symbol': '^GDAXI', 'session': 'Frankfurt', 'volatility': 0.005},
-    'EURUSD': {'symbol': 'EURUSD=X', 'yf_symbol': 'EURUSD=X', 'session': 'London', 'volatility': 0.0015},
     'BTC': {'symbol': 'BTC-USD', 'yf_symbol': 'BTC-USD', 'session': 'NY', 'volatility': 0.03},
     'GOLD': {'symbol': 'GC=F', 'yf_symbol': 'GC=F', 'session': 'London', 'volatility': 0.008},
+}
+
+# Forex News & Economic Calendar (основные события)
+FOREX_EVENTS = {
+    'DXY': '📊 Индекс доллара (USD Index) - мера силы доллара. Рост = укрепление, падение = ослабление',
+    'NFP': '💼 Non-Farm Payroll (США) - количество новых рабочих мест. Влияет на USD и S&P',
+    'CPI': '📈 Инфляция (USA/EUR). Рост = возможное повышение ставок, укрепление валюты',
+    'ECB': '🏦 Заседание ЕЦБ. Решения о ставках влияют на EUR и европейские индексы',
+    'Fed': '🏛️ Заседание ФРС (США). Решения о ставках влияют на USD и глобальные рынки',
+    'Oil': '⛽ Цена нефти (WTI/Brent). Влияет на доллар и акции энергетических компаний',
+    'Crypto': '₿ Криптовалюты. Новости регуляции влияют на BTC и альткойны',
+}
+
+# Market Impact Explanations (объяснения влияния на рынок)
+MARKET_IMPACTS = {
+    'DAX': {
+        'up': 'Немецкие компании растут! 🚀 Причины: улучшение производства, экспорт, позитив из Европы',
+        'down': 'DAX падает 📉 Причины: слабая экономика, рост ставок, проблемы в Европе, недовольство акционеров',
+    },
+    'BTC': {
+        'up': 'Bitcoin взлетел! 🚀 Причины: принятие, вывод с бирж, позитив про регуляцию, инфляция',
+        'down': 'Bitcoin падает 📉 Причины: новые ограничения, вывод с кошельков, негатив про крипто, слабость риск-активов',
+    },
+    'GOLD': {
+        'up': 'Золото растет! 🚀 Причины: инфляция, ослабление доллара, политическая напряженность, страх инвесторов',
+        'down': 'Золото падает 📉 Причины: укрепление доллара, рост ставок, улучшение экономики, отток капитала',
+    },
 }
 
 # Trading Sessions (UTC+3 Haifa timezone)
@@ -293,10 +319,11 @@ class TelegramBot:
 👋 **Добро пожаловать в Korch Trading Bot!**
 
 🤖 Интерактивный торговый бот с анализом **AMD+FVG** стратегии
-📊 Сигналы для DAX, EURUSD, BTC, GOLD
+📊 Сигналы для DAX, BTC, GOLD (EURUSD удален)
 
 Выберите опцию меню:
 📈 Анализ рынка
+📰 Новости форекса
 📢 Торговые сигналы
 📊 Статус бота
 ℹ️ Информация о стратегии
@@ -307,10 +334,13 @@ class TelegramBot:
         keyboard = [
             [
                 InlineKeyboardButton("📈 Анализ", callback_data="analysis"),
-                InlineKeyboardButton("📊 Статус", callback_data="status")
+                InlineKeyboardButton("📰 Новости", callback_data="news")
             ],
             [
-                InlineKeyboardButton("📢 Сигналы", callback_data="signals"),
+                InlineKeyboardButton("📊 Статус", callback_data="status"),
+                InlineKeyboardButton("📢 Сигналы", callback_data="signals")
+            ],
+            [
                 InlineKeyboardButton("ℹ️ Инфо", callback_data="info")
             ]
         ]
@@ -423,6 +453,34 @@ class TelegramBot:
             parse_mode='Markdown'
         )
 
+    async def news_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Show forex news and economic calendar"""
+        news_text = "**📰 Новости форекса и экономический календарь**\n\n"
+
+        news_text += "**🌍 Ключевые экономические события:**\n\n"
+
+        for event_key, event_desc in FOREX_EVENTS.items():
+            news_text += f"{event_desc}\n\n"
+
+        news_text += "---\n\n"
+        news_text += "**📊 Влияние на цены:**\n\n"
+
+        for pair_name, impacts in MARKET_IMPACTS.items():
+            news_text += f"**{pair_name}**\n"
+            news_text += f"📈 При росте: {impacts['up']}\n"
+            news_text += f"📉 При падении: {impacts['down']}\n\n"
+
+        news_text += "🔄 События обновляются каждый час"
+
+        keyboard = [[InlineKeyboardButton("🔙 В меню", callback_data="menu")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        await update.callback_query.edit_message_text(
+            news_text,
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+
     async def button_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle button presses"""
         query = update.callback_query
@@ -430,6 +488,8 @@ class TelegramBot:
 
         if query.data == "analysis":
             await self.analysis_handler(update, context)
+        elif query.data == "news":
+            await self.news_handler(update, context)
         elif query.data == "signals":
             keyboard = [[InlineKeyboardButton("🔙 В меню", callback_data="menu")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
