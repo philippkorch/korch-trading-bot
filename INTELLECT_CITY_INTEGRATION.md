@@ -277,4 +277,31 @@ INTELLECT_city = Average(RSI, Stoch, ROSC, WPR, %R, MACD, MFI, JAP, Trend)
 ---
 
 Created: 2026-10-05  
-Updated: Korch Trading Bot v2.0 с INTELLECT_city и Smart Money подтверждением
+Updated: 2026-10-05 21:00 (v2.1-FINAL)
+Status: ✅ Готов к развертыванию на Railway
+
+## 🎯 Последние улучшения (v2.1-FINAL)
+
+### UI/UX Improvements:
+- **Analysis button** - Добавлена обработка timeout (asyncio.wait_for)
+  - Loading message отправляется сразу
+  - Timeout 10 секунд на каждый fetch
+  - Лучшая обработка ошибок с пояснениями
+  
+- **Status menu** - Полное объяснение AMD+FVG+INTELLECT_city взаимного подтверждения
+  - Каждый компонент объяснен
+  - Показано, как они работают вместе
+  
+- **Demo signal** - Пошаговое разложение сигнала
+  - Каждый из трёх компонентов показан отдельно
+  - Объяснено, почему сигнал сильный
+  
+- **Info section** - Все 8 компонентов INTELLECT_city объяснены
+  - Указано, что индикаторы служат ПОДТВЕРЖДЕНИЕМ
+  - НЕ основным генератором сигналов
+  - Роль каждого компонента в индексе
+
+### Code Improvements:
+- Лучшая обработка исключений в analysis_handler
+- Проверка типа результата intellect_score (dict vs float)
+- Timeout handling для медленных сетевых операций
