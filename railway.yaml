@@ -1,5 +1,4 @@
-<<<<<<< HEAD
-# Railway конфигурация для Korch Trading Bot
+$schema: https://railway.app/railway.schema.json
 
 build:
   builder: dockerfile
@@ -7,23 +6,10 @@ build:
 
 deploy:
   numReplicas: 1
-  restartPolicyType: always
+  restartPolicyMaxRetries: 5
   startCommand: python korch_trading_bot.py
 
-# Переменные окружения
-env:
-=======
-$schema: https://railway.app/railway.schema.json
-
-build:
-  builder: dockerfile
-
-deploy:
-  numReplicas: 1
-  restartPolicyMaxRetries: 5
-
 variables:
->>>>>>> origin/main
   TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
   TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
   TRADINGVIEW_SESSION_ID: ${{ secrets.TRADINGVIEW_SESSION_ID }}
