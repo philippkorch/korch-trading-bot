@@ -740,107 +740,68 @@ class TelegramBot:
             )
 
     async def analysis_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Show market analysis with AMD+FVG+INTELLECT_city strategy breakdown"""
+        """Show market analysis with AMD+FVG+INTELLECT_city"""
         query = update.callback_query
-
+        
+        # Show loading
         try:
-            # Send loading message first to avoid timeout
-            loading_msg = "⏳ **Загружаю анализ...**\n\n📊 Получаю данные для всех пар...\n\nПодождите, это займёт 10-15 секунд."
-            await query.edit_message_text(loading_msg, parse_mode='Markdown')
+            await query.edit_message_text("⏳ Загружаю анализ...", parse_mode='Markdown')
         except:
             pass
 
-        analysis_text = "**📊 Анализ рынка (AMD+FVG+INTELLECT_city)**\n\n"
+        text = "**📊 Анализ (AMD+FVG+INTELLECT)**\n\n"
 
-        for pair_name, config in TRADING_PAIRS.items():
-            analysis_text += f"**{pair_name}**\n"
+        for pair_name, cfg in TRADING_PAIRS.items():
             try:
-                # Fetch OHLCV data with timeout handling
-                ohlcv_1h = await asyncio.wait_for(
-                    self.api.fetch_ohlcv(pair_name, config, timeframe='1h', limit=21),
-                    timeout=10
-                )
-                ohlcv_5m = await asyncio.wait_for(
-                    self.api.fetch_ohlcv(pair_name, config, timeframe='5m', limit=30),
-                    timeout=10
-                )
+                # Get data
+                h1 = await self.api.fetch_ohlcv(pair_name, cfg, '1h', 21)
+                m5 = await self.api.fetch_ohlcv(pair_name, cfg, '5m', 30)
 
-                if ohlcv_1h and len(ohlcv_1h) >= 21:
-                    closes = [c.close for c in ohlcv_1h[-21:]]
+                if h1 and len(h1) >= 21:
+                    closes = [c.close for c in h1[-21:]]
                     ma9 = np.mean(closes[-9:])
                     ma21 = np.mean(closes[-21:])
-                    current = closes[-1]
+                    cur = closes[-1]
 
-                    # AMD Check - Trend detection
-                    amd_check = "✅ AMD" if (current > ma9 > ma21 or current < ma9 < ma21) else "❌ AMD"
-                    amd_status = "Восход 📈" if current > ma9 > ma21 else ("Спад 📉" if current < ma9 < ma21 else "Боковик ➡️")
+                    # AMD
+                    amd_ok = cur > ma9 > ma21 or cur < ma9 < ma21
+                    amd = "✅" if amd_ok else "❌"
+                    trend = "📈" if cur > ma9 > ma21 else ("📉" if cur < ma9 < ma21 else "—")
 
-                    # FVG Check - Structure
-                    fvg_check = "✅ FVG" if (ohlcv_5m and len(ohlcv_5m) >= 3) else "❌ FVG"
+                    # FVG
+                    fvg = "✅" if (m5 and len(m5) >= 3) else "❌"
 
-                    # INTELLECT_city confirmation
-                    intellect_score = 50.0
-                    if ohlcv_5m and len(ohlcv_5m) >= 30:
+                    # INTELLECT
+                    intellect = 50.0
+                    if m5 and len(m5) >= 30:
                         try:
-                            analyzer = IndicatorAnalyzer()
-                            intellect_result = analyzer.calculate_intellect_city_index(ohlcv_5m[-30:])
-                            if isinstance(intellect_result, dict) and 'intellect_score' in intellect_result:
-                                intellect_score = intellect_result['intellect_score']
-                            else:
-                                intellect_score = 50.0
-                        except Exception as e:
-                            logger.warning(f"INTELLECT_city calculation error: {e}")
-                            intellect_score = 50.0
+                            res = IndicatorAnalyzer().calculate_intellect_city_index(m5[-30:])
+                            if isinstance(res, dict) and 'intellect_score' in res:
+                                intellect = float(res['intellect_score'])
+                        except:
+                            pass
 
-                    intellect_emoji = "🟢" if intellect_score >= 60 else ("🔴" if intellect_score <= 40 else "🟡")
-                    intellect_status = "Сильный бычий ✅" if intellect_score >= 70 else ("Бычий ✅" if intellect_score >= 60 else ("Нейтральный 🟡" if intellect_score >= 40 else "Медвежий ❌"))
-                    intellect_check = "✅" if (intellect_score >= 60 or intellect_score <= 40) else "🟡"
+                    intel_emoji = "🟢" if intellect >= 60 else ("🔴" if intellect <= 40 else "🟡")
+                    intel_ok = "✅" if (intellect >= 60 or intellect <= 40) else "🟡"
 
-                    # Overall signal status
-                    signal_ready = amd_check.startswith("✅") and fvg_check.startswith("✅") and intellect_check == "✅"
-                    signal_emoji = "🟢 ГОТОВО" if signal_ready else "🟡 Мониторинг"
+                    # Status
+                    ready = amd_ok and (m5 and len(m5) >= 3) and (intellect >= 60 or intellect <= 40)
+                    status = "🟢 OK" if ready else "🟡 Wait"
 
-                    analysis_text += f"""💰 Цена: `{current:.5f}` | {amd_status}
-
-**🎯 Стратегия AMD+FVG+INTELLECT:**
-{amd_check} Тренд | {fvg_check} Структура | {intellect_check} Подтверждение
-{signal_emoji}
-
-**📊 MA анализ:**
-├─ MA9: `{ma9:.5f}`
-├─ MA21: `{ma21:.5f}`
-└─ Разница: `{abs(ma9-ma21):.5f}`
-
-{intellect_emoji} **INTELLECT_city:** `{intellect_score:.0f}%` ({intellect_status})
-
-"""
+                    text += f"`{pair_name}` {trend} | MA:{ma9:.0f}/{ma21:.0f}\n"
+                    text += f"{amd} {fvg} {intel_ok} | {intel_emoji}{intellect:.0f}% | {status}\n\n"
                 else:
-                    analysis_text += f"⏳ Недостаточно данных\n\n"
-            except asyncio.TimeoutError:
-                logger.error(f"Timeout fetching data for {pair_name}")
-                analysis_text += f"⏱️ Timeout при загрузке данных\n\n"
+                    text += f"`{pair_name}` - Loading...\n\n"
             except Exception as e:
-                logger.error(f"Error in analysis for {pair_name}: {e}")
-                analysis_text += f"⚠️ Ошибка: {str(e)[:40]}\n\n"
+                text += f"`{pair_name}` - Error\n\n"
 
-        analysis_text += "\n⏰ Обновляется в реальном времени...\n"
-        analysis_text += "📌 ✅ = готово к сигналу | 🟡 = мониторинг"
+        text += f"⏰ {datetime.now().strftime('%H:%M')}"
 
-        keyboard = [[InlineKeyboardButton("🔙 В меню", callback_data="menu")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-
+        kb = [[InlineKeyboardButton("🔙 Menu", callback_data="menu")]]
         try:
-            await query.edit_message_text(
-                analysis_text,
-                reply_markup=reply_markup,
-                parse_mode='Markdown'
-            )
-        except Exception as e:
-            logger.error(f"Error sending analysis: {e}")
-            try:
-                await query.answer("❌ Ошибка при загрузке анализа.", show_alert=True)
-            except:
-                pass
+            await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown')
+        except:
+            pass
 
     async def status_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show bot status with strategy confirmation breakdown"""
@@ -909,34 +870,38 @@ class TelegramBot:
         normal = []
 
         for event_key, event_data in FOREX_EVENTS.items():
-            level = event_data['level']
-            text = event_data['text']
-            if level == '🔴':
-                critical.append(text)
-            elif level == '🟠':
-                medium.append(text)
-            else:
-                normal.append(text)
+            critical.append(event_data) if event_data['level'] == '🔴' else (
+                medium.append(event_data) if event_data['level'] == '🟠' else normal.append(event_data)
+            )
 
         # КРИТИЧНЫЕ события (красные)
         if critical:
             news_text += "**🔴 КРИТИЧНЫЕ СОБЫТИЯ (Опасно для рынка):**\n"
             for event in critical:
-                news_text += f"• {event}\n"
+                date_str = f"\n   📅 {event.get('date', 'N/A')}" if 'date' in event else ""
+                time_str = f" | ⏰ {event.get('time', 'N/A')}" if 'time' in event else ""
+                impact_str = f"\n   💥 {event.get('impact', '')}" if 'impact' in event else ""
+                news_text += f"{event.get('level', '🔴')} {event.get('text', '')}{date_str}{time_str}{impact_str}\n\n"
             news_text += "\n"
 
         # Средней важности (оранжевые)
         if medium:
             news_text += "**🟠 СРЕДНЯЯ ВАЖНОСТЬ (Внимание):**\n"
             for event in medium:
-                news_text += f"• {event}\n"
+                date_str = f"\n   📅 {event.get('date', 'N/A')}" if 'date' in event else ""
+                time_str = f" | ⏰ {event.get('time', 'N/A')}" if 'time' in event else ""
+                impact_str = f"\n   💥 {event.get('impact', '')}" if 'impact' in event else ""
+                news_text += f"{event.get('level', '🟠')} {event.get('text', '')}{date_str}{time_str}{impact_str}\n\n"
             news_text += "\n"
 
         # Нормальные события (зелёные)
         if normal:
             news_text += "**🟢 НОРМАЛЬНЫЕ СОБЫТИЯ (Всё хорошо):**\n"
             for event in normal:
-                news_text += f"• {event}\n"
+                date_str = f"\n   📅 {event.get('date', 'N/A')}" if 'date' in event else ""
+                time_str = f" | ⏰ {event.get('time', 'N/A')}" if 'time' in event else ""
+                impact_str = f"\n   💥 {event.get('impact', '')}" if 'impact' in event else ""
+                news_text += f"{event.get('level', '🟢')} {event.get('text', '')}{date_str}{time_str}{impact_str}\n\n"
             news_text += "\n"
 
         news_text += "---\n\n"
@@ -947,7 +912,7 @@ class TelegramBot:
             news_text += f"📈 При росте: {impacts['up']}\n"
             news_text += f"📉 При падении: {impacts['down']}\n\n"
 
-        news_text += "🔄 События обновляются каждый час"
+        news_text += f"🔄 Обновлено: {datetime.now().strftime('%d.%m.%Y %H:%M')}"
 
         keyboard = [[InlineKeyboardButton("🔙 В меню", callback_data="menu")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
