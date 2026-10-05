@@ -16,8 +16,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy bot files
 COPY . .
 
-# Cache invalidation - v2.1 FINAL: Improved UI, Analysis button fix, Strategy confirmation breakdown (2026-10-05 2100)
-RUN echo "Build v2.1-FINAL with: Analysis button timeout handling, Status/Demo signals with strategy breakdown, All 8 INTELLECT components"
+# Cache invalidation - v2.1 FINAL: Improved UI, Analysis button fix, Strategy confirmation breakdown, Error handling (2026-10-05 2030)
+RUN echo "Build v2.1 with proper error handlers - aiohttp 3.9.0, Analysis/Status handlers fixed"
 
 # Run bot
 CMD ["python", "korch_trading_bot.py"]
