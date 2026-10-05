@@ -11,7 +11,15 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt .
 
 # Install Python dependencies (force reinstall to bypass cache)
-RUN pip install --no-cache-dir -r requirements.txt
+# Using explicit requirement override to ensure correct aiohttp version
+RUN pip install --no-cache-dir \
+    python-telegram-bot==20.3 \
+    requests==2.31.0 \
+    numpy==1.26.0 \
+    python-dateutil==2.8.2 \
+    aiohttp==3.9.0 \
+    matplotlib==3.8.0 \
+    Pillow==10.0.0
 
 # Copy bot files
 COPY . .
