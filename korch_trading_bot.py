@@ -120,6 +120,7 @@ class MarketDataAPI:
         self.cache = {}
         self.cache_time = {}
         self.cache_duration = 300  # 5 minutes
+        self.last_ohlcv = {}  # Store last successful OHLCV data
 
     async def fetch_ohlcv(self, pair_name: str, pair_config: Dict, timeframe: str = '1h', limit: int = 50) -> List[OHLCV]:
         """
@@ -175,12 +176,17 @@ class MarketDataAPI:
             # Cache the result
             self.cache[cache_key] = ohlcv_list
             self.cache_time[cache_key] = now
+            self.last_ohlcv[pair_name] = ohlcv_list  # Save last successful data
 
             logger.info(f"✅ Fetched {len(ohlcv_list)} candles for {pair_name}")
             return ohlcv_list
 
         except Exception as e:
             logger.error(f"Error fetching {pair_name} ({pair_config.get('yf_symbol')}): {e}")
+            # Return last known data if available
+            if pair_name in self.last_ohlcv and self.last_ohlcv[pair_name]:
+                logger.info(f"⚠️ Using cached data for {pair_name}")
+                return self.last_ohlcv[pair_name]
             return []
 
     def _generate_demo_data(self, pair_name: str, limit: int = 21) -> List[OHLCV]:
@@ -392,6 +398,7 @@ class TelegramBot:
                 InlineKeyboardButton("📢 Сигналы", callback_data="signals")
             ],
             [
+                InlineKeyboardButton("🔔 Демо-сигнал", callback_data="demo_signal"),
                 InlineKeyboardButton("ℹ️ Инфо", callback_data="info")
             ]
         ]
@@ -565,6 +572,39 @@ class TelegramBot:
             parse_mode='Markdown'
         )
 
+    async def demo_signal_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Show example trading signal for editing"""
+        demo_signal_text = """
+🟢 **BUY GER40**
+
+📊 Сигнал: AMD + FVG подтверждение
+⏱️ Таймфрейм: 1H+1M
+🎲 Уверенность: 75%
+
+**📈 Детали сделки**
+💰 Вход: `18250.50`
+🛑 Stop Loss: `18200.00` (50 пипс)
+🎁 Take Profit: `18350.00`
+📊 R:R: 1:2
+
+⏰ Время: 22:13:45
+📌 Сессия: Frankfurt
+
+---
+
+**Это ДЕМО-ПРИМЕР сигнала.**
+Отредактируй формат, и я обновлю бот.
+        """
+
+        keyboard = [[InlineKeyboardButton("🔙 В меню", callback_data="menu")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        await update.callback_query.edit_message_text(
+            demo_signal_text,
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+
     async def button_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle button presses"""
         query = update.callback_query
@@ -574,6 +614,8 @@ class TelegramBot:
             await self.analysis_handler(update, context)
         elif query.data == "news":
             await self.news_handler(update, context)
+        elif query.data == "demo_signal":
+            await self.demo_signal_handler(update, context)
         elif query.data == "signals":
             keyboard = [[InlineKeyboardButton("🔙 В меню", callback_data="menu")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
