@@ -1,6 +1,5 @@
 """
-Korch Trading Bot - Async Trading Bot with AMD+FVG Strategy
-Analyzes multiple timeframes and sends signals via Telegram
+Korch Trading Bot - Interactive Telegram Bot with Charts
 """
 
 import asyncio
@@ -10,8 +9,13 @@ from datetime import datetime
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 import aiohttp
-from telegram import Bot
+from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 from telegram.error import TelegramError
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
+from io import BytesIO
+import numpy as np
 
 # Configure logging
 logging.basicConfig(
@@ -22,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 # Configuration
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN', '')
-TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID', '')
+TELEGRAM_CHAT_ID = int(os.getenv('TELEGRAM_CHAT_ID', '0'))
 TRADINGVIEW_SESSION_ID = os.getenv('TRADINGVIEW_SESSION_ID', '')
 
 TRADING_PAIRS = {
@@ -161,16 +165,176 @@ class StrategyAnalyzer:
         )
 
 
-class TelegramSignalSender:
-    """Sends signals via Telegram"""
+class ChartGenerator:
+    """Generates trading charts with SL/TP visualization"""
     
-    def __init__(self, bot_token: str, chat_id: str):
-        self.bot = Bot(token=bot_token)
+    @staticmethod
+    def create_signal_chart(signal: Signal) -> BytesIO:
+        """Create chart with signal visualization"""
+        fig, ax = plt.subplots(figsize=(10, 6))
+        fig.patch.set_facecolor('#1a1a1a')
+        ax.set_facecolor('#2a2a2a')
+        
+        # Price points
+        prices = np.array([signal.stop_loss, signal.entry, signal.take_profit])
+        labels = ['SL', 'Entry', 'TP']
+        colors = ['#ff4444', '#00ff00', '#4444ff']
+        
+        # Plot
+        ax.scatter(range(len(prices)), prices, s=300, c=colors, zorder=3)
+        ax.plot(range(len(prices)), prices, 'w--', alpha=0.3, linewidth=2)
+        
+        # Add price labels
+        for i, (price, label) in enumerate(zip(prices, labels)):
+            ax.text(i, price, f'  {price:.5f}\n{label}', 
+                   color=colors[i], fontsize=10, va='center')
+        
+        # Zones
+        ax.axhspan(signal.stop_loss - 0.0001, signal.entry, alpha=0.1, color='red', label='Risk Zone')
+        ax.axhspan(signal.entry, signal.take_profit + 0.0001, alpha=0.1, color='green', label='Profit Zone')
+        
+        # Styling
+        ax.set_title(f'{signal.pair} - {signal.direction} Signal', 
+                    color='white', fontsize=14, fontweight='bold')
+        ax.set_ylabel('Price', color='white', fontsize=12)
+        ax.set_xticks([0, 1, 2])
+        ax.tick_params(colors='white')
+        
+        # Grid
+        ax.grid(True, alpha=0.2, color='white')
+        ax.legend(loc='upper left', facecolor='#2a2a2a', edgecolor='white')
+        
+        # Info text
+        info_text = f"""
+Pair: {signal.pair}
+Direction: {signal.direction}
+Entry: {signal.entry}
+SL: {signal.stop_loss}
+TP: {signal.take_profit}
+Ratio: 1:2 Risk/Reward
+Confidence: {signal.confidence*100:.0f}%
+        """
+        ax.text(0.98, 0.02, info_text, transform=ax.transAxes,
+               color='white', fontsize=9, verticalalignment='bottom',
+               horizontalalignment='right', bbox=dict(boxstyle='round', 
+               facecolor='#1a1a1a', alpha=0.8))
+        
+        # Save to BytesIO
+        buf = BytesIO()
+        plt.tight_layout()
+        plt.savefig(buf, format='png', facecolor='#1a1a1a', dpi=100)
+        buf.seek(0)
+        plt.close()
+        
+        return buf
+
+
+class TelegramBot:
+    """Interactive Telegram Bot"""
+    
+    def __init__(self, bot_token: str, chat_id: int):
         self.chat_id = chat_id
+        self.bot_token = bot_token
+        self.application = Application.builder().token(bot_token).build()
         self.daily_signals = {}
+        self.strategy = StrategyAnalyzer()
+        self.chart_gen = ChartGenerator()
+        
+        # Add handlers
+        self.application.add_handler(CommandHandler("start", self.start_handler))
+        self.application.add_handler(CommandHandler("status", self.status_handler))
+        self.application.add_handler(CommandHandler("analysis", self.analysis_handler))
+        self.application.add_handler(CallbackQueryHandler(self.button_handler))
+    
+    async def start_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Start command handler"""
+        keyboard = [
+            [InlineKeyboardButton("📊 Market Analysis", callback_data='analysis')],
+            [InlineKeyboardButton("📈 Current Signals", callback_data='signals')],
+            [InlineKeyboardButton("⚙️ Status", callback_data='status')],
+            [InlineKeyboardButton("💡 Strategy Info", callback_data='info')],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await update.message.reply_text(
+            "🤖 **Korch Trading Bot**\n\n"
+            "AMD+FVG Strategy Analyzer\n\n"
+            "Select an option:",
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+    
+    async def analysis_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Market analysis handler"""
+        pairs_status = "\n".join([
+            f"• {pair}: Monitoring 1H + 5M"
+            for pair in TRADING_PAIRS.keys()
+        ])
+        
+        await update.message.reply_text(
+            f"📊 **Market Analysis**\n\n"
+            f"Active Pairs:\n{pairs_status}\n\n"
+            f"Strategy: AMD + FVG\n"
+            f"Risk/Reward: 1:2\n"
+            f"Daily Limit: {DAILY_SIGNAL_LIMIT} signals",
+            parse_mode='Markdown'
+        )
+    
+    async def status_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Status handler"""
+        today = datetime.now().date()
+        signals_sent = self.daily_signals.get(today, 0)
+        
+        status_text = f"""
+🟢 **Bot Status: ACTIVE**
+
+📊 Session: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+🎯 Signals Today: {signals_sent}/{DAILY_SIGNAL_LIMIT}
+⏱️ Check Interval: {SIGNAL_CHECK_INTERVAL}s
+🔄 Status: Monitoring markets...
+
+**Pairs:**
+• EURUSD - Active
+• GBPUSD - Active  
+• USDJPY - Active
+• AUDUSD - Active
+        """
+        
+        await update.message.reply_text(status_text, parse_mode='Markdown')
+    
+    async def button_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Button callback handler"""
+        query = update.callback_query
+        await query.answer()
+        
+        if query.data == 'analysis':
+            await self.analysis_handler(update, context)
+        elif query.data == 'signals':
+            await query.edit_message_text("📈 No active signals at the moment.\nWaiting for setup...")
+        elif query.data == 'status':
+            await self.status_handler(update, context)
+        elif query.data == 'info':
+            info_text = """
+**AMD+FVG Strategy**
+
+📌 **AMD** (Auraprice Movement Direction):
+- Detects trend direction on 5M
+- Threshold: 70% confidence
+
+📌 **FVG** (Fair Value Gap):
+- Identifies price inefficiencies on 1H
+- Entry opportunity signal
+
+✅ **Confirmation**: Both conditions aligned
+💰 **Risk**: 1% per trade
+📊 **Ratio**: 1:2 Reward/Risk
+
+Daily Limit: 5 signals max
+            """
+            await query.edit_message_text(info_text, parse_mode='Markdown')
     
     async def send_signal(self, signal: Signal) -> bool:
-        """Send signal"""
+        """Send signal with chart"""
         try:
             today = datetime.now().date()
             if today not in self.daily_signals:
@@ -180,8 +344,35 @@ class TelegramSignalSender:
                 logger.warning("Daily limit reached")
                 return False
             
-            message = self._format_signal(signal)
-            await self.bot.send_message(chat_id=self.chat_id, text=message)
+            # Create chart
+            chart = self.chart_gen.create_signal_chart(signal)
+            
+            # Message
+            message = f"""
+🎯 **TRADING SIGNAL**
+
+📊 **{signal.pair}**
+📈 Direction: **{signal.direction}**
+⏱️ Timeframe: {signal.timeframe}
+🎲 Confidence: {signal.confidence*100:.0f}%
+
+💰 **Entry**: {signal.entry}
+🛑 **Stop Loss**: {signal.stop_loss}
+🎁 **Take Profit**: {signal.take_profit}
+
+📌 Strategy: {signal.reason}
+⏰ Time: {datetime.now().strftime('%H:%M:%S')}
+            """
+            
+            # Send photo with caption
+            async with aiohttp.ClientSession() as session:
+                bot = Bot(token=TELEGRAM_BOT_TOKEN)
+                await bot.send_photo(
+                    chat_id=self.chat_id,
+                    photo=chart,
+                    caption=message,
+                    parse_mode='Markdown'
+                )
             
             self.daily_signals[today] += 1
             logger.info(f"Signal sent: {signal.pair}")
@@ -191,37 +382,29 @@ class TelegramSignalSender:
             logger.error(f"Telegram error: {e}")
             return False
     
-    def _format_signal(self, signal: Signal) -> str:
-        """Format signal message"""
-        return f"""
-🎯 Trading Signal
-
-📊 Pair: {signal.pair}
-📈 Direction: {signal.direction}
-⏱️ Timeframe: {signal.timeframe}
-
-💰 Entry: {signal.entry}
-🛑 SL: {signal.stop_loss}
-🎁 TP: {signal.take_profit}
-
-📌 {signal.reason}
-⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-"""
+    async def start(self):
+        """Start bot"""
+        await self.application.initialize()
+        await self.application.start()
+        await self.application.updater.start_polling()
 
 
 class KorchTradingBot:
-    """Main bot"""
+    """Main bot orchestrator"""
     
-    def __init__(self, bot_token: str, chat_id: str, session_id: str):
+    def __init__(self, bot_token: str, chat_id: int, session_id: str):
         self.api = TradingViewAPI(session_id)
         self.strategy = StrategyAnalyzer()
-        self.telegram = TelegramSignalSender(bot_token, chat_id)
+        self.telegram = TelegramBot(bot_token, chat_id)
         self.is_running = False
     
     async def run(self):
         """Main loop"""
         self.is_running = True
-        logger.info("Korch Bot started")
+        logger.info("Korch Bot started with interactive features")
+        
+        # Start Telegram bot
+        await self.telegram.start()
         
         while self.is_running:
             try:
