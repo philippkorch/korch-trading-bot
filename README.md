@@ -228,9 +228,9 @@ Async trading bot with AMD+FVG strategy detection. Analyzes multiple timeframes 
 ```
 python-telegram-bot==20.3
 requests==2.31.0
-numpy==1.24.3
+numpy==1.26.0
 python-dateutil==2.8.2
-aiohttp==3.8.7
+aiohttp==3.9.0
 ```
 
 ## Environment Variables
