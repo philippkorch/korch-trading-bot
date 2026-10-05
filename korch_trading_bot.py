@@ -29,8 +29,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Configuration from environment or defaults
-TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN', '8999356089:AAEzV2onmpC6oFe-j19M26UTFLxU14N6fSCs')
-TELEGRAM_CHAT_ID = int(os.getenv('TELEGRAM_CHAT_ID', '457832510'))
+TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN', '8999356089:AAEzV2onmpC6oFe-j9M26UTFLxU14N6fSCs')
+TELEGRAM_CHAT_ID = int(os.getenv('TELEGRAM_CHAT_ID', '8999356089'))
 
 # Risk Management
 RISK_PER_TRADE = 0.01  # 1% per trade
