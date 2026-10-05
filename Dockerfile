@@ -16,8 +16,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy bot files
 COPY . .
 
-# Cache invalidation - force rebuild (2026-10-05 21:00)
-RUN echo "Rebuilt with yfinance support and real market data integration"
+# Cache invalidation - force rebuild (2026-10-05 21:26)
+RUN echo "Force full rebuild with correct dependencies and Russian bot UI"
 
 # Run bot
 CMD ["python", "korch_trading_bot.py"]
