@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Korch Trading Bot - Interactive Telegram Bot with AMD+FVG Strategy
+Korch Trading Bot - Интерактивный Telegram бот с анализом AMD+FVG
 Анализирует стратегию AMD+FVG и отправляет сигналы в Telegram с интерактивным меню
 """
 
@@ -280,6 +280,7 @@ class TelegramBot:
         self.bot = Bot(token=bot_token)
         self.daily_signals = {}
         self.application = Application.builder().token(bot_token).build()
+        self.api = MarketDataAPI()
 
         # Add command handlers
         self.application.add_handler(CommandHandler("start", self.start))
@@ -289,81 +290,94 @@ class TelegramBot:
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /start command"""
         welcome_text = """
-👋 Welcome to **Korch Trading Bot**!
+👋 **Добро пожаловать в Korch Trading Bot!**
 
-🤖 I'm an interactive trading bot analyzing **AMD+FVG** strategy
-📊 Real-time signals for GER40, EURUSD, BTCUSDT, XAUUSD
+🤖 Интерактивный торговый бот с анализом **AMD+FVG** стратегии
+📊 Сигналы для DAX, EURUSD, BTC, GOLD
 
-Use the menu below to:
-📈 View analysis
-📢 Check signals
-📊 See bot status
-ℹ️ Learn about strategy
+Выберите опцию меню:
+📈 Анализ рынка
+📢 Торговые сигналы
+📊 Статус бота
+ℹ️ Информация о стратегии
 
-Let's make profitable trades! 💰
+Давайте зарабатывать! 💰
         """
 
         keyboard = [
             [
-                InlineKeyboardButton("📈 Analysis", callback_data="analysis"),
-                InlineKeyboardButton("📊 Status", callback_data="status")
+                InlineKeyboardButton("📈 Анализ", callback_data="analysis"),
+                InlineKeyboardButton("📊 Статус", callback_data="status")
             ],
             [
-                InlineKeyboardButton("📢 Signals", callback_data="signals"),
-                InlineKeyboardButton("ℹ️ Info", callback_data="info")
+                InlineKeyboardButton("📢 Сигналы", callback_data="signals"),
+                InlineKeyboardButton("ℹ️ Инфо", callback_data="info")
             ]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
-        await update.message.reply_text(welcome_text, reply_markup=reply_markup, parse_mode='Markdown')
+        if update.message:
+            await update.message.reply_text(welcome_text, reply_markup=reply_markup, parse_mode='Markdown')
+        elif update.callback_query:
+            await update.callback_query.edit_message_text(welcome_text, reply_markup=reply_markup, parse_mode='Markdown')
 
     async def menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Display main menu"""
         keyboard = [
             [
-                InlineKeyboardButton("📈 Analysis", callback_data="analysis"),
-                InlineKeyboardButton("📊 Status", callback_data="status")
+                InlineKeyboardButton("📈 Анализ", callback_data="analysis"),
+                InlineKeyboardButton("📊 Статус", callback_data="status")
             ],
             [
-                InlineKeyboardButton("📢 Signals", callback_data="signals"),
-                InlineKeyboardButton("ℹ️ Info", callback_data="info")
+                InlineKeyboardButton("📢 Сигналы", callback_data="signals"),
+                InlineKeyboardButton("ℹ️ Инфо", callback_data="info")
             ]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
-        await update.message.reply_text(
-            "🤖 **Main Menu**\n\nSelect an option:",
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
+        if update.message:
+            await update.message.reply_text(
+                "🤖 **Главное меню**\n\nВыберите опцию:",
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
+            )
+        else:
+            await update.callback_query.edit_message_text(
+                "🤖 **Главное меню**\n\nВыберите опцию:",
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
+            )
 
     async def analysis_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Show market analysis"""
-        api = MarketDataAPI()
-        analysis_text = "**📊 Market Analysis**\n\n"
+        """Show market analysis with real prices"""
+        analysis_text = "**📊 Анализ рынка**\n\n"
 
         for pair_name, config in TRADING_PAIRS.items():
-            ohlcv_data = await api.fetch_ohlcv(pair_name, config, timeframe='1h', limit=21)
+            try:
+                ohlcv_data = await self.api.fetch_ohlcv(pair_name, config, timeframe='1h', limit=21)
 
-            if ohlcv_data and len(ohlcv_data) >= 21:
-                closes = [c.close for c in ohlcv_data[-21:]]
-                ma9 = np.mean(closes[-9:])
-                ma21 = np.mean(closes[-21:])
-                current = closes[-1]
-                trend = "📈 Uptrend" if current > ma9 > ma21 else ("📉 Downtrend" if current < ma9 < ma21 else "➡️ Sideways")
+                if ohlcv_data and len(ohlcv_data) >= 21:
+                    closes = [c.close for c in ohlcv_data[-21:]]
+                    ma9 = np.mean(closes[-9:])
+                    ma21 = np.mean(closes[-21:])
+                    current = closes[-1]
+                    trend = "📈 Восход" if current > ma9 > ma21 else ("📉 Спад" if current < ma9 < ma21 else "➡️ Боковик")
 
-                analysis_text += f"""**{pair_name}** ({config['session']})
-Price: `{current:.5f}`
-MA9: `{ma9:.5f}` | MA21: `{ma21:.5f}`
-Trend: {trend}
+                    analysis_text += f"""**{pair_name}**
+💰 Цена: `{current:.5f}`
+📊 MA9: `{ma9:.5f}` | MA21: `{ma21:.5f}`
+📈 {trend}
 
 """
-            else:
-                analysis_text += f"**{pair_name}**: ⏳ Loading data...\n\n"
+                else:
+                    analysis_text += f"**{pair_name}**: ⏳ Загрузка...\n\n"
+            except Exception as e:
+                logger.error(f"Error in analysis for {pair_name}: {e}")
+                analysis_text += f"**{pair_name}**: ❌ Ошибка загрузки\n\n"
 
-        analysis_text += "🔄 Updating every 5 minutes..."
+        analysis_text += "🔄 Обновляется каждые 5 минут..."
 
-        keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data="menu")]]
+        keyboard = [[InlineKeyboardButton("🔙 В меню", callback_data="menu")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         await update.callback_query.edit_message_text(
@@ -377,30 +391,30 @@ Trend: {trend}
         uptime = datetime.now().strftime('%H:%M:%S')
 
         status_text = f"""
-**🤖 Bot Status**
+**🤖 Статус бота**
 
-✅ **Bot Status**: ONLINE
-⏰ **Uptime**: Running
-📡 **Connection**: Connected
-🔋 **Health**: Optimal
+✅ **Статус**: ОНЛАЙН
+⏰ **Время работы**: Запущен
+📡 **Соединение**: Подключено
+🔋 **Здоровье**: Отлично
 
-**Daily Stats**
-📊 Signals Today: 0/5
-💰 Daily P/L: +0%
+**Статистика за день**
+📊 Сигналов: 0/5
+💰 P/L: +0%
 📈 Win Rate: N/A
 
-**Strategy Status**
-📌 AMD: Active
-📌 FVG: Monitoring
-🎯 Confidence: 70%+
+**Статус стратегии**
+📌 AMD: Активна
+📌 FVG: Мониторинг
+🎯 Уверенность: 70%+
 
-📡 Data Source: TradingView
-🌍 Market: 24/5
+📡 Источник: Yahoo Finance
+🌍 Рынок: 24/5
 
-Last Update: {uptime}
+Последнее обновление: {uptime}
         """
 
-        keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data="menu")]]
+        keyboard = [[InlineKeyboardButton("🔙 В меню", callback_data="menu")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         await update.callback_query.edit_message_text(
@@ -417,10 +431,10 @@ Last Update: {uptime}
         if query.data == "analysis":
             await self.analysis_handler(update, context)
         elif query.data == "signals":
-            keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data="menu")]]
+            keyboard = [[InlineKeyboardButton("🔙 В меню", callback_data="menu")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
             await query.edit_message_text(
-                "📢 **No active signals at the moment**\n\nWaiting for AMD+FVG setup confirmation...\n⏳ Next check in 5 minutes",
+                "📢 **Активных сигналов нет**\n\nОжидаем подтверждение AMD+FVG...\n⏳ Следующая проверка через 5 минут",
                 reply_markup=reply_markup,
                 parse_mode='Markdown'
             )
@@ -430,41 +444,41 @@ Last Update: {uptime}
             await self.start(update, context)
         elif query.data == "info":
             info_text = """
-**📌 AMD+FVG Strategy**
+**📌 Стратегия AMD+FVG**
 
 **🎯 AMD** (After Market Delivery)
-• Detects trend direction on 1H timeframe
-• Confirms with Moving Averages (MA9 & MA21)
-• Entry on 5M inversion/BOS structure
-• Confidence: 70%+
+• Определяет направление тренда на 1H
+• Подтверждение Moving Averages (MA9 & MA21)
+• Вход на инверсию/BOS структуре 5M
+• Уверенность: 70%+
 
 **📌 FVG** (Fair Value Gap)
-• Identifies price inefficiencies
-• Previous candle ≠ Current candle range
-• Often acts as support/resistance
-• Entry confirmation signal
+• Выявляет неэффективность цены
+• Предыдущая свеча ≠ Текущая свеча диапазон
+• Часто служит поддержкой/сопротивлением
+• Сигнал подтверждения входа
 
-**📊 Risk Management**
-💰 Risk per trade: 1%
-📈 Reward/Risk ratio: 1:2
-🛑 Daily loss limit: 2% max
-📋 Max signals daily: 5
+**📊 Управление риском**
+💰 Риск на сделку: 1%
+📈 Соотношение Риск/Прибыль: 1:2
+🛑 Макс потеря в день: 2%
+📋 Макс сигналов в день: 5
 
-**⏰ Trading Sessions**
-🇩🇪 Frankfurt: 6:00-8:00 (UTC+3)
-🇬🇧 London: 7:00-10:00 (UTC+3)
-🗽 New York: 12:00-16:00 (UTC+3)
+**⏰ Торговые сессии**
+🇩🇪 Франкфурт: 6:00-8:00 (UTC+3)
+🇬🇧 Лондон: 7:00-10:00 (UTC+3)
+🗽 Нью-Йорк: 12:00-16:00 (UTC+3)
 
-**💡 Entry Rules**
-✅ Only in trend direction
-✅ AMD + FVG confirmation
-✅ 5M inversion before entry
-✅ 1:2 R:R minimum
+**💡 Правила входа**
+✅ Только в направлении тренда
+✅ AMD + FVG подтверждение
+✅ Инверсия 5M перед входом
+✅ Минимум 1:2 R:R
 
-Created for Philipp's trading ✨
+Создано для торговли Филиппа ✨
             """
 
-            keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data="menu")]]
+            keyboard = [[InlineKeyboardButton("🔙 В меню", callback_data="menu")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
 
             await query.edit_message_text(
@@ -489,18 +503,18 @@ Created for Philipp's trading ✨
             message = f"""
 {emoji} **{signal.direction} {signal.pair}**
 
-📊 Signal: {signal.reason}
-⏱️ Timeframe: {signal.timeframe}
-🎲 Confidence: {signal.confidence * 100:.0f}%
+📊 Сигнал: {signal.reason}
+⏱️ Таймфрейм: {signal.timeframe}
+🎲 Уверенность: {signal.confidence * 100:.0f}%
 
-**📈 Trade Details**
-💰 Entry: `{signal.entry}`
-🛑 Stop Loss: `{signal.stop_loss}` ({signal.pips} pips)
+**📈 Детали сделки**
+💰 Вход: `{signal.entry}`
+🛑 Stop Loss: `{signal.stop_loss}` ({signal.pips} пипс)
 🎁 Take Profit: `{signal.take_profit}`
-📊 R:R Ratio: {signal.rr_ratio}
+📊 R:R: {signal.rr_ratio}
 
-⏰ Time: {datetime.now().strftime('%H:%M:%S')}
-📌 Session: {TRADING_PAIRS[signal.pair]['session']}
+⏰ Время: {datetime.now().strftime('%H:%M:%S')}
+📌 Сессия: {TRADING_PAIRS[signal.pair]['session']}
             """
 
             await self.bot.send_message(
