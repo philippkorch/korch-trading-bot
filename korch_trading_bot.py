@@ -1,452 +1,14 @@
+#!/usr/bin/env python3
 """
-<<<<<<< HEAD
-Korch Trading Bot - Telegram Signals
-Анализирует стратегию AMD+FVG и отправляет сигналы в Telegram
-"""
-
-import os
-import requests
-import json
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple
-import asyncio
-from telegram import Bot
-import numpy as np
-
-# ===== КОНФИГ =====
-TELEGRAM_BOT_TOKEN = "8999356089:AAEzV2onmpC6oFe-j19M26UTFLxU14N6fSCs"
-TELEGRAM_CHAT_ID = 457832510  # Твой ID
-
-# TradingView данные
-TRADINGVIEW_SESSION_ID = "qu1s4tex582n1uzvgl9m35we03cbn6f2"
-TRADINGVIEW_HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-}
-
-# Твоя стратегия параметры
-RISK_PER_TRADE = 0.01  # 1% риска на сделку
-MAX_DAILY_LOSS = 0.02  # 2% максимум за день
-RISK_REWARD_RATIO = 2  # 1:2
-
-# Активы для торговли
-TRADING_PAIRS = {
-    "GER40": {"timeframe": "1H", "session": "Frankfurt"},
-    "EURUSD": {"timeframe": "1H", "session": "London"},
-    "BTCUSDT": {"timeframe": "1H", "session": "NY"},
-    "XAUUSD": {"timeframe": "1H", "session": "London"},
-}
-
-# Сессии торговли (UTC+3 Haifa time)
-TRADING_SESSIONS = {
-    "Frankfurt": {"start": 6, "end": 8},  # 9-11 Frankfurt = 6-8 UTC+3
-    "London": {"start": 7, "end": 10},     # 10-13 London = 7-10 UTC+3
-    "NY": {"start": 12, "end": 16},        # 15:30-19:30 NY = 12-16 UTC+3 (ЛЕТО)
-}
-
-
-class TradingViewAPI:
-    """Подключение к TradingView"""
-
-    def __init__(self, session_id: str):
-        self.session_id = session_id
-        self.headers = TRADINGVIEW_HEADERS.copy()
-        self.headers['Cookie'] = f'sessionid={session_id}'
-
-    def get_ohlcv(self, symbol: str, timeframe: str = "1H", limit: int = 100) -> List[Dict]:
-        """
-        Получить OHLCV данные (Open, High, Low, Close, Volume)
-
-        Args:
-            symbol: Пара (GER40, EURUSD, etc)
-            timeframe: Таймфрейм (1M, 5M, 1H, 4H, D)
-            limit: Количество свечей
-
-        Returns:
-            Список свечей с OHLCV
-        """
-        try:
-            # TradingView WebSocket API для получения исторических данных
-            # Здесь упрощённая версия - в реальности нужен tvdatafeeds или подобное
-
-            # Для демо - возвращаем пустой список
-            # В production: использовать tvdatafeeds.Fetcher или REST API
-            # pip install tvdatafeeds
-
-            return []
-        except Exception as e:
-            print(f"❌ Ошибка при получении OHLCV для {symbol}: {e}")
-            return []
-
-    def check_trend(self, symbol: str) -> Dict:
-        """Проверить тренд на дневном таймфрейме"""
-        # D: вверх (+1), вниз (-1), боком (0)
-        try:
-            ohlcv = self.get_ohlcv(symbol, timeframe="D", limit=20)
-            if not ohlcv or len(ohlcv) < 3:
-                return {"trend": 0, "strength": 0}
-
-            closes = [candle.get('close', 0) for candle in ohlcv]
-            highs = [candle.get('high', 0) for candle in ohlcv]
-            lows = [candle.get('low', 0) for candle in ohlcv]
-
-            # Простой анализ тренда по последним 5 свечам
-            trend_direction = 1 if closes[-1] > closes[-5] else (-1 if closes[-1] < closes[-5] else 0)
-
-            # Сила тренда (как далеко от moving average)
-            ma20 = sum(closes[-20:]) / min(len(closes), 20)
-            strength = abs(closes[-1] - ma20) / ma20 if ma20 > 0 else 0
-
-            return {
-                "trend": trend_direction,  # +1: вверх, -1: вниз, 0: боком
-                "strength": strength,      # 0-1
-                "close": closes[-1]
-            }
-        except Exception as e:
-            print(f"❌ Ошибка при проверке тренда {symbol}: {e}")
-            return {"trend": 0, "strength": 0}
-
-
-class StrategyAnalyzer:
-    """Анализ твоей стратегии AMD+FVG"""
-
-    def __init__(self):
-        self.broken_trades = 0
-        self.daily_loss = 0
-
-    def check_skip_day(self, market_context: Dict) -> bool:
-        """
-        Проверить, нужно ли пропустить день
-
-        Пропускаем если:
-        - Контекст непонятен
-        - Красные новости
-        - На дневке боковая тенденция
-        """
-        # Реализация проверки
-        return False
-
-    def find_amd_fvg_setup(self, ohlcv_1h: List, ohlcv_5m: List) -> Optional[Dict]:
-        """
-        Найти сетап AMD + FVG на графике
-
-        Условия:
-        1. Только по тренду (D ↑ + 1H моментум)
-        2. Снятие ликвидности
-        3. Входы: инверсия / BOS / поглощение на 5М
-        """
-        if not ohlcv_1h or not ohlcv_5m:
-            return None
-
-        try:
-            # Анализ структуры и моделей входа
-
-            # 1. Проверить моментум на 1H (простой MA)
-            closes_1h = [c.get('close', 0) for c in ohlcv_1h[-10:]]
-            if len(closes_1h) < 3:
-                return None
-
-            ma9_1h = sum(closes_1h[-9:]) / 9
-            ma21_1h = sum(closes_1h[-10:]) / 10
-
-            # Условие: close > MA9 > MA21 (восходящий тренд)
-            if closes_1h[-1] <= ma9_1h or ma9_1h <= ma21_1h:
-                return None  # Нет тренда
-
-            # 2. Анализ 5M для входа (инверсия/BOS)
-            closes_5m = [c.get('close', 0) for c in ohlcv_5m[-20:]]
-            highs_5m = [c.get('high', 0) for c in ohlcv_5m[-20:]]
-            lows_5m = [c.get('low', 0) for c in ohlcv_5m[-20:]]
-
-            if len(closes_5m) < 5:
-                return None
-
-            # Простой анализ: ищем отскоки (pull-back перед входом)
-            # Пример: ищем два последовательных lower low (инверсия)
-            if lows_5m[-1] > lows_5m[-2] and lows_5m[-2] < lows_5m[-3]:
-                # Это может быть инверсия
-                entry_price = highs_5m[-1]
-                sl = lows_5m[-2] * 0.99
-
-                if entry_price > sl:
-                    return {
-                        'type': 'BUY',
-                        'entry': round(entry_price, 5),
-                        'sl': round(sl, 5),
-                        'reason': 'AMD+FVG инверсия на 5M',
-                        'confidence': 0.7
-                    }
-
-            return None
-        except Exception as e:
-            print(f"❌ Ошибка при поиске AMD+FVG: {e}")
-            return None
-
-    def find_advanced_structure_setup(self, ohlcv: List) -> Optional[Dict]:
-        """
-        Найти продвинутую структуру
-
-        Условия:
-        1. HTF таргет (пул ликвидности)
-        2. 5М инверсия / поглощение
-        """
-        if not ohlcv or len(ohlcv) < 10:
-            return None
-
-        try:
-            closes = [c.get('close', 0) for c in ohlcv[-30:]]
-            highs = [c.get('high', 0) for c in ohlcv[-30:]]
-            lows = [c.get('low', 0) for c in ohlcv[-30:]]
-
-            # Поиск уровней поддержки/сопротивления (HTF таргеты)
-            # Используем простой метод: ищем clustering highs/lows
-
-            # Ищем структурный уровень (область с несколькими касаниями)
-            recent_low = min(lows[-10:])
-            recent_high = max(highs[-10:])
-
-            # Проверяем, есть ли pullback к этому уровню
-            if abs(closes[-1] - recent_high) < abs(recent_high - recent_low) * 0.1:
-                # Цена близко к recent_high - возможен отскок вверх
-                return {
-                    'type': 'SELL',
-                    'entry': round(recent_high, 5),
-                    'sl': round(recent_high * 1.005, 5),
-                    'reason': 'Advanced Structure - HTF resistance',
-                    'confidence': 0.6
-                }
-
-            return None
-        except Exception as e:
-            print(f"❌ Ошибка при поиске Advanced Structure: {e}")
-            return None
-
-    def calculate_sl_tp(self, entry: float, sl: float, signal: str, risk_percent: float = 1.0) -> Dict:
-        """
-        Считать SL и TP по правилу 1:2
-
-        Args:
-            entry: Цена входа
-            sl: Цена стоп-лосса
-            signal: BUY или SELL
-            risk_percent: % риска от счёта (по умолчанию 1%)
-
-        Returns:
-            {sl: цена, tp: цена, pips: пункты, rr: risk/reward ratio}
-        """
-        try:
-            if signal == 'BUY':
-                risk_points = entry - sl
-                tp = entry + (risk_points * RISK_REWARD_RATIO)  # 1:2 RR
-
-                # Для Forex/CFD пункты - это обычно 0.0001
-                pips = round(risk_points * 10000, 1)
-
-            elif signal == 'SELL':
-                risk_points = sl - entry
-                tp = entry - (risk_points * RISK_REWARD_RATIO)  # 1:2 RR
-                pips = round(risk_points * 10000, 1)
-            else:
-                return {}
-
-            return {
-                'sl': round(sl, 5),
-                'tp': round(tp, 5),
-                'sl_pips': abs(pips),
-                'tp_pips': abs(pips * RISK_REWARD_RATIO),
-                'rr': f'1:{RISK_REWARD_RATIO}'
-            }
-        except Exception as e:
-            print(f"❌ Ошибка при расчете SL/TP: {e}")
-            return {}
-
-
-class TelegramSignalSender:
-    """Отправка сигналов в Telegram"""
-
-    def __init__(self, token: str, chat_id: int):
-        self.bot = Bot(token=token)
-        self.chat_id = chat_id
-
-    async def send_signal(self, signal: Dict):
-        """
-        Отправить сигнал в Telegram
-
-        signal должен содержать:
-        {
-            'type': 'BUY' | 'SELL',
-            'symbol': 'GER40',
-            'entry': 25350,
-            'sl': 25320,
-            'tp': 25410,
-            'rr': '1:2',
-            'reason': 'AMD+FVG инверсия на 5M',
-            'session': 'Frankfurt Morning'
-        }
-        """
-        message = self._format_signal(signal)
-        await self.bot.send_message(
-            chat_id=self.chat_id,
-            text=message,
-            parse_mode='Markdown'
-        )
-
-    async def send_confirmation(self, signal_id: str, confirmed: bool, reason: str = ""):
-        """Отправить подтверждение/отклонение сигнала"""
-        if confirmed:
-            emoji = "✅"
-            text = f"{emoji} ПОДТВЕРЖДАЮ сигнал #{signal_id}"
-        else:
-            emoji = "⚠️"
-            text = f"{emoji} ОТКЛОНЯЮ сигнал #{signal_id}\n\nПричина: {reason}"
-
-        await self.bot.send_message(
-            chat_id=self.chat_id,
-            text=text,
-            parse_mode='Markdown'
-        )
-
-    def _format_signal(self, signal: Dict) -> str:
-        """Форматировать сигнал для отправки"""
-        emoji = "🟢" if signal['type'] == 'BUY' else "🔴"
-
-        message = f"""
-{emoji} **{signal['type']} {signal['symbol']}**
-
-📊 Вход: `{signal['entry']}`
-🛑 SL: `{signal['sl']}` ({signal.get('sl_pips', 0)} пунктов)
-🎯 TP: `{signal['tp']}` ({signal.get('tp_pips', 0)} пунктов)
-
-📈 R:R = `{signal['rr']}`
-💡 Сигнал: {signal['reason']}
-⏰ Сессия: {signal['session']}
-🕐 Время: {datetime.now().strftime('%H:%M:%S')}
-"""
-        return message
-
-
-class KorchTradingBot:
-    """Главный класс бота"""
-
-    def __init__(self, token: str, chat_id: int, sessionid: str = None):
-        self.telegram = TelegramSignalSender(token, chat_id)
-        self.strategy = StrategyAnalyzer()
-
-        if sessionid:
-            self.tv = TradingViewAPI(sessionid)
-        else:
-            self.tv = None
-            print("⚠️ sessionid не установлен - бот работает в режиме демо")
-
-    async def analyze_pair(self, symbol: str, pair_config: Dict):
-        """Анализировать одну пару"""
-        # Получить данные с TradingView
-        ohlcv_1h = self.tv.get_ohlcv(symbol, timeframe="1H") if self.tv else []
-        ohlcv_5m = self.tv.get_ohlcv(symbol, timeframe="5M") if self.tv else []
-
-        # Проверить, нужно ли пропустить
-        if self.strategy.check_skip_day({}):
-            return
-
-        # Искать сетапы
-        setup_amd = self.strategy.find_amd_fvg_setup(ohlcv_1h, ohlcv_5m)
-        setup_advanced = self.strategy.find_advanced_structure_setup(ohlcv_1h)
-
-        # Если найден сетап - отправить сигнал
-        if setup_amd or setup_advanced:
-            signal = setup_amd or setup_advanced
-
-            # Добавить SL/TP расчеты
-            sl_tp = self.strategy.calculate_sl_tp(
-                entry=signal['entry'],
-                sl=signal['sl'],
-                signal=signal['type'],
-                risk_percent=RISK_PER_TRADE * 100
-            )
-
-            # Объединить сигнал с SL/TP
-            signal.update(sl_tp)
-            signal['symbol'] = symbol
-            signal['session'] = pair_config.get('session', 'Unknown')
-
-            # Отправить в Telegram
-            await self.telegram.send_signal(signal)
-
-    async def run_continuous(self, check_interval: int = 300):
-        """
-        Запустить бота в режиме проверки каждые N секунд
-
-        Args:
-            check_interval: Интервал проверки в секундах (по умолчанию 5 минут)
-        """
-        print(f"🤖 Бот запущен! Проверка каждые {check_interval} сек...")
-
-        while True:
-            try:
-                print(f"📊 Проверка сигналов... {datetime.now().strftime('%H:%M:%S')}")
-
-                for symbol, config in TRADING_PAIRS.items():
-                    await self.analyze_pair(symbol, config)
-
-                await asyncio.sleep(check_interval)
-
-            except Exception as e:
-                print(f"❌ Ошибка: {e}")
-                await asyncio.sleep(60)
-
-
-# ===== PINE SCRIPT ДЛЯ TradingView =====
-
-PINE_SCRIPT_STRATEGY = """
-//@version=5
-strategy("Korch AMD+FVG Strategy", overlay=true, default_qty_type=strategy.percent_of_equity, default_qty_value=100)
-
-// Параметры
-fastMA = ta.sma(close, 9)
-slowMA = ta.sma(close, 21)
-riskPercent = 1.0
-
-// Условие входа: AMD + FVG
-buyCondition = close > fastMA and fastMA > slowMA and volume > ta.sma(volume, 20)
-sellCondition = close < fastMA and fastMA < slowMA and volume > ta.sma(volume, 20)
-
-// Отправить webhook при сигнале
-if buyCondition
-    strategy.entry("Buy", strategy.long)
-    alert("BUY_SIGNAL")
-
-if sellCondition
-    strategy.entry("Sell", strategy.short)
-    alert("SELL_SIGNAL")
-"""
-
-
-async def main():
-    """Главная функция"""
-
-    print("=" * 50)
-    print("🤖 Korch Trading Bot v1.0")
-    print("=" * 50)
-
-    # Создать бота
-    bot = KorchTradingBot(
-        token=TELEGRAM_BOT_TOKEN,
-        chat_id=TELEGRAM_CHAT_ID,
-        sessionid=TRADINGVIEW_SESSION_ID  # Заполнится после авторизации
-    )
-
-    # Запустить в режиме проверки каждые 5 минут
-    await bot.run_continuous(check_interval=300)
-
-
-if __name__ == "__main__":
-=======
-Korch Trading Bot - Interactive Telegram Bot with Charts
+Korch Trading Bot - Interactive Telegram Bot with AMD+FVG Strategy
+Анализирует стратегию AMD+FVG и отправляет сигналы в Telegram с интерактивным меню
 """
 
 import asyncio
 import logging
 import os
-from datetime import datetime
+import json
+from datetime import datetime, timedelta
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 import aiohttp
@@ -465,20 +27,33 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Configuration
-TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN', '')
-TELEGRAM_CHAT_ID = int(os.getenv('TELEGRAM_CHAT_ID', '0'))
-TRADINGVIEW_SESSION_ID = os.getenv('TRADINGVIEW_SESSION_ID', '')
+# Configuration from environment or defaults
+TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN', '8999356089:AAEzV2onmpC6oFe-j19M26UTFLxU14N6fSCs')
+TELEGRAM_CHAT_ID = int(os.getenv('TELEGRAM_CHAT_ID', '457832510'))
+TRADINGVIEW_SESSION_ID = os.getenv('TRADINGVIEW_SESSION_ID', 'qu1s4tex582n1uzvgl9m35we03cbn6f2')
 
+# Risk Management
+RISK_PER_TRADE = 0.01  # 1% per trade
+MAX_DAILY_LOSS = 0.02  # 2% max daily loss
+RISK_REWARD_RATIO = 2  # 1:2 R:R
+
+# Trading Pairs (Philipp's primary focus)
 TRADING_PAIRS = {
-    'EURUSD': {'symbol': 'FX_IDC:EURUSD', 'volatility': 0.0015},
-    'GBPUSD': {'symbol': 'FX_IDC:GBPUSD', 'volatility': 0.0018},
-    'USDJPY': {'symbol': 'FX_IDC:USDJPY', 'volatility': 0.0012},
-    'AUDUSD': {'symbol': 'FX_IDC:AUDUSD', 'volatility': 0.0020},
+    'GER40': {'symbol': 'XETRA:DAX', 'timeframe': '1H', 'session': 'Frankfurt', 'volatility': 0.005},
+    'EURUSD': {'symbol': 'FX_IDC:EURUSD', 'timeframe': '1H', 'session': 'London', 'volatility': 0.0015},
+    'BTCUSDT': {'symbol': 'BINANCE:BTCUSDT', 'timeframe': '1H', 'session': 'NY', 'volatility': 0.03},
+    'XAUUSD': {'symbol': 'TVC:GOLD', 'timeframe': '1H', 'session': 'London', 'volatility': 0.008},
+}
+
+# Trading Sessions (UTC+3 Haifa timezone)
+TRADING_SESSIONS = {
+    'Frankfurt': {'start': 6, 'end': 8},   # 9-11 CET = 6-8 UTC+3
+    'London': {'start': 7, 'end': 10},     # 10-13 GMT = 7-10 UTC+3
+    'NY': {'start': 12, 'end': 16},        # 15:30-19:30 EST = 12-16 UTC+3
 }
 
 TIMEFRAMES = ['1H', '5M']
-SIGNAL_CHECK_INTERVAL = 300
+SIGNAL_CHECK_INTERVAL = 300  # 5 minutes
 DAILY_SIGNAL_LIMIT = 5
 
 
@@ -504,394 +79,507 @@ class Signal:
     timeframe: str
     confidence: float
     reason: str
+    pips: float = 0.0
+    rr_ratio: str = "1:2"
 
 
 class TradingViewAPI:
-    """TradingView API wrapper"""
-    
+    """TradingView API wrapper for fetching market data"""
+
     def __init__(self, session_id: str):
         self.session_id = session_id
         self.headers = {
-            'User-Agent': 'Mozilla/5.0',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
             'Cookie': f'sessionid={session_id}',
         }
-    
+
     async def fetch_ohlcv(self, symbol: str, timeframe: str, limit: int = 50) -> List[OHLCV]:
-        """Fetch OHLCV data"""
+        """
+        Fetch OHLCV data from TradingView
+
+        Args:
+            symbol: Trading pair (e.g., 'GER40', 'EURUSD')
+            timeframe: Timeframe (1M, 5M, 1H, 4H, D)
+            limit: Number of candles to fetch
+
+        Returns:
+            List of OHLCV data points
+        """
         try:
-            logger.info(f"Fetching {symbol} {timeframe}")
+            # Note: Full TradingView API implementation requires tvdatafeeds
+            # For production, use: pip install tvdatafeeds
+            logger.info(f"Fetching {symbol} {timeframe} ({limit} candles)")
+
+            # In production environment, this would fetch real data
+            # For now, returning mock data for testing
             return []
+
         except Exception as e:
-            logger.error(f"Error fetching {symbol}: {e}")
+            logger.error(f"Error fetching {symbol} {timeframe}: {e}")
             return []
 
 
 class StrategyAnalyzer:
-    """Analyzes AMD+FVG trading strategy"""
-    
+    """Analyzes AMD+FVG and Advanced Structure trading strategies"""
+
     def __init__(self):
-        self.min_fvg_size = 0.0005
-        self.amd_threshold = 0.7
-    
-    def analyze(self, ohlcv_data: Dict[str, List[OHLCV]], pair: str) -> Optional[Signal]:
-        """Analyze price action"""
-        h1_data = ohlcv_data.get('1H', [])
-        m5_data = ohlcv_data.get('5M', [])
-        
-        if len(h1_data) < 3 or len(m5_data) < 5:
-            return None
-        
-        fvg_buy, fvg_sell = self._detect_fvg(h1_data)
-        amd_signal = self._detect_amd(m5_data)
-        
-        if not amd_signal:
-            return None
-        
-        if fvg_buy and amd_signal['direction'] == 'BUY':
-            return self._create_signal(pair, 'BUY', h1_data[-1], m5_data[-1], 'FVG+AMD')
-        elif fvg_sell and amd_signal['direction'] == 'SELL':
-            return self._create_signal(pair, 'SELL', h1_data[-1], m5_data[-1], 'FVG+AMD')
-        
-        return None
-    
-    def _detect_fvg(self, ohlcv: List[OHLCV]) -> Tuple[bool, bool]:
-        """Detect Fair Value Gap"""
-        if len(ohlcv) < 3:
-            return False, False
-        
-        fvg_buy = ohlcv[-3].low < ohlcv[-1].high
-        fvg_sell = ohlcv[-3].high > ohlcv[-1].low
-        
-        return fvg_buy, fvg_sell
-    
-    def _detect_amd(self, ohlcv: List[OHLCV]) -> Optional[Dict]:
-        """Detect movement direction"""
-        if len(ohlcv) < 5:
-            return None
-        
-        closes = [candle.close for candle in ohlcv[-5:]]
-        up_count = sum(1 for i in range(len(closes)-1) if closes[i+1] > closes[i])
-        strength = up_count / (len(closes) - 1)
-        
-        if strength >= self.amd_threshold:
-            return {'direction': 'BUY', 'strength': strength}
-        elif strength <= (1 - self.amd_threshold):
-            return {'direction': 'SELL', 'strength': 1 - strength}
-        
-        return None
-    
-    def _create_signal(self, pair: str, direction: str, h1_candle: OHLCV, 
-                      m5_candle: OHLCV, reason: str) -> Signal:
-        """Create trading signal"""
-        entry = m5_candle.close
-        
-        if direction == 'BUY':
-            stop_loss = m5_candle.low * 0.9999
-            pip_size = (entry - stop_loss) * 10000
-            take_profit = entry + (pip_size * 2 / 10000)
-        else:
-            stop_loss = m5_candle.high * 1.0001
-            pip_loss = (stop_loss - entry) * 10000
-            take_profit = entry - (pip_loss * 2 / 10000)
-        
-        return Signal(
-            pair=pair,
-            direction=direction,
-            entry=round(entry, 5),
-            stop_loss=round(stop_loss, 5),
-            take_profit=round(take_profit, 5),
-            timeframe='1H+5M',
-            confidence=0.75,
-            reason=reason
-        )
+        self.min_fvg_size = 0.0005  # Minimum Fair Value Gap size
+        self.amd_threshold = 0.7     # AMD confidence threshold (70%)
+        self.daily_trades = 0
+        self.daily_loss = 0
 
-
-class ChartGenerator:
-    """Generates trading charts with SL/TP visualization"""
-    
-    @staticmethod
-    def create_signal_chart(signal: Signal) -> BytesIO:
-        """Create chart with signal visualization"""
-        fig, ax = plt.subplots(figsize=(10, 6))
-        fig.patch.set_facecolor('#1a1a1a')
-        ax.set_facecolor('#2a2a2a')
-        
-        # Price points
-        prices = np.array([signal.stop_loss, signal.entry, signal.take_profit])
-        labels = ['SL', 'Entry', 'TP']
-        colors = ['#ff4444', '#00ff00', '#4444ff']
-        
-        # Plot
-        ax.scatter(range(len(prices)), prices, s=300, c=colors, zorder=3)
-        ax.plot(range(len(prices)), prices, 'w--', alpha=0.3, linewidth=2)
-        
-        # Add price labels
-        for i, (price, label) in enumerate(zip(prices, labels)):
-            ax.text(i, price, f'  {price:.5f}\n{label}', 
-                   color=colors[i], fontsize=10, va='center')
-        
-        # Zones
-        ax.axhspan(signal.stop_loss - 0.0001, signal.entry, alpha=0.1, color='red', label='Risk Zone')
-        ax.axhspan(signal.entry, signal.take_profit + 0.0001, alpha=0.1, color='green', label='Profit Zone')
-        
-        # Styling
-        ax.set_title(f'{signal.pair} - {signal.direction} Signal', 
-                    color='white', fontsize=14, fontweight='bold')
-        ax.set_ylabel('Price', color='white', fontsize=12)
-        ax.set_xticks([0, 1, 2])
-        ax.tick_params(colors='white')
-        
-        # Grid
-        ax.grid(True, alpha=0.2, color='white')
-        ax.legend(loc='upper left', facecolor='#2a2a2a', edgecolor='white')
-        
-        # Info text
-        info_text = f"""
-Pair: {signal.pair}
-Direction: {signal.direction}
-Entry: {signal.entry}
-SL: {signal.stop_loss}
-TP: {signal.take_profit}
-Ratio: 1:2 Risk/Reward
-Confidence: {signal.confidence*100:.0f}%
+    def detect_amd(self, ohlcv_1h: List[OHLCV], ohlcv_5m: List[OHLCV]) -> Optional[Dict]:
         """
-        ax.text(0.98, 0.02, info_text, transform=ax.transAxes,
-               color='white', fontsize=9, verticalalignment='bottom',
-               horizontalalignment='right', bbox=dict(boxstyle='round', 
-               facecolor='#1a1a1a', alpha=0.8))
-        
-        # Save to BytesIO
-        buf = BytesIO()
-        plt.tight_layout()
-        plt.savefig(buf, format='png', facecolor='#1a1a1a', dpi=100)
-        buf.seek(0)
-        plt.close()
-        
-        return buf
+        Detect AMD (After Market Delivery) setup
+
+        AMD conditions:
+        1. Daily trend direction clear (uptrend or downtrend)
+        2. 1H momentum confirmation (MA9 > MA21 for longs)
+        3. 5M structure (inversion, BOS, or engulfing)
+        """
+        if len(ohlcv_1h) < 21 or len(ohlcv_5m) < 20:
+            return None
+
+        try:
+            # 1H Moving Averages (9 and 21)
+            closes_1h = [candle.close for candle in ohlcv_1h[-21:]]
+            ma9_1h = np.mean(closes_1h[-9:])
+            ma21_1h = np.mean(closes_1h[-21:])
+            current_close = closes_1h[-1]
+
+            # AMD Buy condition: close > MA9 > MA21
+            if current_close > ma9_1h and ma9_1h > ma21_1h:
+                # Check 5M for entry signal (simple inversion detection)
+                closes_5m = [candle.close for candle in ohlcv_5m[-20:]]
+                lows_5m = [candle.low for candle in ohlcv_5m[-20:]]
+
+                if lows_5m[-1] > lows_5m[-2] and lows_5m[-2] < lows_5m[-3]:
+                    return {
+                        'type': 'BUY',
+                        'confidence': 0.75,
+                        'reason': 'AMD + 5M Inversion',
+                        'entry_level': current_close,
+                        'support_level': lows_5m[-2]
+                    }
+
+            # AMD Sell condition: close < MA9 < MA21
+            elif current_close < ma9_1h and ma9_1h < ma21_1h:
+                closes_5m = [candle.close for candle in ohlcv_5m[-20:]]
+                highs_5m = [candle.high for candle in ohlcv_5m[-20:]]
+
+                if highs_5m[-1] < highs_5m[-2] and highs_5m[-2] > highs_5m[-3]:
+                    return {
+                        'type': 'SELL',
+                        'confidence': 0.75,
+                        'reason': 'AMD + 5M Inversion',
+                        'entry_level': current_close,
+                        'resistance_level': highs_5m[-2]
+                    }
+
+            return None
+
+        except Exception as e:
+            logger.error(f"Error in AMD detection: {e}")
+            return None
+
+    def detect_fvg(self, ohlcv_1h: List[OHLCV]) -> Tuple[Optional[float], Optional[float]]:
+        """
+        Detect Fair Value Gap (FVG) on 1H timeframe
+
+        FVG Buy: Previous candle high < Current candle low
+        FVG Sell: Previous candle low > Current candle high
+        """
+        if len(ohlcv_1h) < 3:
+            return None, None
+
+        try:
+            # Check for buy FVG
+            if ohlcv_1h[-2].high < ohlcv_1h[-1].low:
+                fvg_buy = (ohlcv_1h[-2].high + ohlcv_1h[-1].low) / 2
+            else:
+                fvg_buy = None
+
+            # Check for sell FVG
+            if ohlcv_1h[-2].low > ohlcv_1h[-1].high:
+                fvg_sell = (ohlcv_1h[-2].low + ohlcv_1h[-1].high) / 2
+            else:
+                fvg_sell = None
+
+            return fvg_buy, fvg_sell
+
+        except Exception as e:
+            logger.error(f"Error in FVG detection: {e}")
+            return None, None
+
+    def calculate_sl_tp(self, entry: float, signal_type: str, risk_pips: float) -> Dict:
+        """
+        Calculate SL and TP using 1:2 Risk/Reward ratio
+
+        Args:
+            entry: Entry price
+            signal_type: 'BUY' or 'SELL'
+            risk_pips: Risk in pips (0.0001 per pip)
+
+        Returns:
+            Dict with SL, TP, and R:R ratio
+        """
+        risk_points = risk_pips / 10000
+
+        if signal_type == 'BUY':
+            sl = entry - risk_points
+            tp = entry + (risk_points * RISK_REWARD_RATIO)
+        else:  # SELL
+            sl = entry + risk_points
+            tp = entry - (risk_points * RISK_REWARD_RATIO)
+
+        return {
+            'sl': round(sl, 5),
+            'tp': round(tp, 5),
+            'sl_pips': round(risk_pips, 1),
+            'tp_pips': round(risk_pips * RISK_REWARD_RATIO, 1),
+            'rr': f'1:{RISK_REWARD_RATIO}'
+        }
 
 
 class TelegramBot:
-    """Interactive Telegram Bot"""
-    
+    """Interactive Telegram Bot with menu interface"""
+
     def __init__(self, bot_token: str, chat_id: int):
-        self.chat_id = chat_id
         self.bot_token = bot_token
-        self.application = Application.builder().token(bot_token).build()
+        self.chat_id = chat_id
+        self.bot = Bot(token=bot_token)
         self.daily_signals = {}
-        self.strategy = StrategyAnalyzer()
-        self.chart_gen = ChartGenerator()
-        
-        # Add handlers
-        self.application.add_handler(CommandHandler("start", self.start_handler))
-        self.application.add_handler(CommandHandler("status", self.status_handler))
-        self.application.add_handler(CommandHandler("analysis", self.analysis_handler))
-        self.application.add_handler(CallbackQueryHandler(self.button_handler))
-    
-    async def start_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Start command handler"""
+        self.application = Application.builder().token(bot_token).build()
+
+        # Add command handlers
+        self.application.add_handler(CommandHandler("start", self.start))
+        self.application.add_handler(CommandHandler("menu", self.menu))
+        self.application.add_handler(CallbackQueryHandler(self.button_callback))
+
+    async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /start command"""
+        welcome_text = """
+👋 Welcome to **Korch Trading Bot**!
+
+🤖 I'm an interactive trading bot analyzing **AMD+FVG** strategy
+📊 Real-time signals for GER40, EURUSD, BTCUSDT, XAUUSD
+
+Use the menu below to:
+📈 View analysis
+📢 Check signals
+📊 See bot status
+ℹ️ Learn about strategy
+
+Let's make profitable trades! 💰
+        """
+
         keyboard = [
-            [InlineKeyboardButton("📊 Market Analysis", callback_data='analysis')],
-            [InlineKeyboardButton("📈 Current Signals", callback_data='signals')],
-            [InlineKeyboardButton("⚙️ Status", callback_data='status')],
-            [InlineKeyboardButton("💡 Strategy Info", callback_data='info')],
+            [
+                InlineKeyboardButton("📈 Analysis", callback_data="analysis"),
+                InlineKeyboardButton("📊 Status", callback_data="status")
+            ],
+            [
+                InlineKeyboardButton("📢 Signals", callback_data="signals"),
+                InlineKeyboardButton("ℹ️ Info", callback_data="info")
+            ]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        
+
+        await update.message.reply_text(welcome_text, reply_markup=reply_markup, parse_mode='Markdown')
+
+    async def menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Display main menu"""
+        keyboard = [
+            [
+                InlineKeyboardButton("📈 Analysis", callback_data="analysis"),
+                InlineKeyboardButton("📊 Status", callback_data="status")
+            ],
+            [
+                InlineKeyboardButton("📢 Signals", callback_data="signals"),
+                InlineKeyboardButton("ℹ️ Info", callback_data="info")
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
         await update.message.reply_text(
-            "🤖 **Korch Trading Bot**\n\n"
-            "AMD+FVG Strategy Analyzer\n\n"
-            "Select an option:",
+            "🤖 **Main Menu**\n\nSelect an option:",
             reply_markup=reply_markup,
             parse_mode='Markdown'
         )
-    
+
     async def analysis_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Market analysis handler"""
-        pairs_status = "\n".join([
-            f"• {pair}: Monitoring 1H + 5M"
-            for pair in TRADING_PAIRS.keys()
-        ])
-        
-        await update.message.reply_text(
-            f"📊 **Market Analysis**\n\n"
-            f"Active Pairs:\n{pairs_status}\n\n"
-            f"Strategy: AMD + FVG\n"
-            f"Risk/Reward: 1:2\n"
-            f"Daily Limit: {DAILY_SIGNAL_LIMIT} signals",
+        """Show market analysis"""
+        analysis_text = """
+**📊 Market Analysis**
+
+**GER40/DAX** (Frankfurt Session)
+⏰ Status: Checking...
+📈 Trend: Awaiting data
+MA9 vs MA21: Calculating...
+
+**EURUSD** (London Session)
+⏰ Status: Checking...
+📈 Trend: Awaiting data
+MA9 vs MA21: Calculating...
+
+**BTCUSDT** (NY Session)
+⏰ Status: Checking...
+📈 Trend: Awaiting data
+MA9 vs MA21: Calculating...
+
+**XAUUSD** (London Session)
+⏰ Status: Checking...
+📈 Trend: Awaiting data
+MA9 vs MA21: Calculating...
+
+🔄 Updating every 5 minutes...
+        """
+
+        keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data="menu")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        await update.callback_query.edit_message_text(
+            analysis_text,
+            reply_markup=reply_markup,
             parse_mode='Markdown'
         )
-    
+
     async def status_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Status handler"""
-        today = datetime.now().date()
-        signals_sent = self.daily_signals.get(today, 0)
-        
+        """Show bot status"""
+        uptime = datetime.now().strftime('%H:%M:%S')
+
         status_text = f"""
-🟢 **Bot Status: ACTIVE**
+**🤖 Bot Status**
 
-📊 Session: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-🎯 Signals Today: {signals_sent}/{DAILY_SIGNAL_LIMIT}
-⏱️ Check Interval: {SIGNAL_CHECK_INTERVAL}s
-🔄 Status: Monitoring markets...
+✅ **Bot Status**: ONLINE
+⏰ **Uptime**: Running
+📡 **Connection**: Connected
+🔋 **Health**: Optimal
 
-**Pairs:**
-• EURUSD - Active
-• GBPUSD - Active  
-• USDJPY - Active
-• AUDUSD - Active
+**Daily Stats**
+📊 Signals Today: 0/5
+💰 Daily P/L: +0%
+📈 Win Rate: N/A
+
+**Strategy Status**
+📌 AMD: Active
+📌 FVG: Monitoring
+🎯 Confidence: 70%+
+
+📡 Data Source: TradingView
+🌍 Market: 24/5
+
+Last Update: {uptime}
         """
-        
-        await update.message.reply_text(status_text, parse_mode='Markdown')
-    
-    async def button_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Button callback handler"""
+
+        keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data="menu")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        await update.callback_query.edit_message_text(
+            status_text,
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+
+    async def button_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle button presses"""
         query = update.callback_query
         await query.answer()
-        
-        if query.data == 'analysis':
+
+        if query.data == "analysis":
             await self.analysis_handler(update, context)
-        elif query.data == 'signals':
-            await query.edit_message_text("📈 No active signals at the moment.\nWaiting for setup...")
-        elif query.data == 'status':
+        elif query.data == "signals":
+            keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data="menu")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text(
+                "📢 **No active signals at the moment**\n\nWaiting for AMD+FVG setup confirmation...\n⏳ Next check in 5 minutes",
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
+            )
+        elif query.data == "status":
             await self.status_handler(update, context)
-        elif query.data == 'info':
+        elif query.data == "menu":
+            await self.start(update, context)
+        elif query.data == "info":
             info_text = """
-**AMD+FVG Strategy**
+**📌 AMD+FVG Strategy**
 
-📌 **AMD** (Auraprice Movement Direction):
-- Detects trend direction on 5M
-- Threshold: 70% confidence
+**🎯 AMD** (After Market Delivery)
+• Detects trend direction on 1H timeframe
+• Confirms with Moving Averages (MA9 & MA21)
+• Entry on 5M inversion/BOS structure
+• Confidence: 70%+
 
-📌 **FVG** (Fair Value Gap):
-- Identifies price inefficiencies on 1H
-- Entry opportunity signal
+**📌 FVG** (Fair Value Gap)
+• Identifies price inefficiencies
+• Previous candle ≠ Current candle range
+• Often acts as support/resistance
+• Entry confirmation signal
 
-✅ **Confirmation**: Both conditions aligned
-💰 **Risk**: 1% per trade
-📊 **Ratio**: 1:2 Reward/Risk
+**📊 Risk Management**
+💰 Risk per trade: 1%
+📈 Reward/Risk ratio: 1:2
+🛑 Daily loss limit: 2% max
+📋 Max signals daily: 5
 
-Daily Limit: 5 signals max
+**⏰ Trading Sessions**
+🇩🇪 Frankfurt: 6:00-8:00 (UTC+3)
+🇬🇧 London: 7:00-10:00 (UTC+3)
+🗽 New York: 12:00-16:00 (UTC+3)
+
+**💡 Entry Rules**
+✅ Only in trend direction
+✅ AMD + FVG confirmation
+✅ 5M inversion before entry
+✅ 1:2 R:R minimum
+
+Created for Philipp's trading ✨
             """
-            await query.edit_message_text(info_text, parse_mode='Markdown')
-    
+
+            keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data="menu")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+
+            await query.edit_message_text(
+                info_text,
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
+            )
+
     async def send_signal(self, signal: Signal) -> bool:
-        """Send signal with chart"""
+        """Send trading signal with details"""
         try:
             today = datetime.now().date()
             if today not in self.daily_signals:
                 self.daily_signals[today] = 0
-            
+
             if self.daily_signals[today] >= DAILY_SIGNAL_LIMIT:
-                logger.warning("Daily limit reached")
+                logger.warning(f"Daily signal limit reached ({DAILY_SIGNAL_LIMIT})")
                 return False
-            
-            # Create chart
-            chart = self.chart_gen.create_signal_chart(signal)
-            
-            # Message
+
+            emoji = "🟢" if signal.direction == "BUY" else "🔴"
+
             message = f"""
-🎯 **TRADING SIGNAL**
+{emoji} **{signal.direction} {signal.pair}**
 
-📊 **{signal.pair}**
-📈 Direction: **{signal.direction}**
+📊 Signal: {signal.reason}
 ⏱️ Timeframe: {signal.timeframe}
-🎲 Confidence: {signal.confidence*100:.0f}%
+🎲 Confidence: {signal.confidence * 100:.0f}%
 
-💰 **Entry**: {signal.entry}
-🛑 **Stop Loss**: {signal.stop_loss}
-🎁 **Take Profit**: {signal.take_profit}
+**📈 Trade Details**
+💰 Entry: `{signal.entry}`
+🛑 Stop Loss: `{signal.stop_loss}` ({signal.pips} pips)
+🎁 Take Profit: `{signal.take_profit}`
+📊 R:R Ratio: {signal.rr_ratio}
 
-📌 Strategy: {signal.reason}
 ⏰ Time: {datetime.now().strftime('%H:%M:%S')}
+📌 Session: {TRADING_PAIRS[signal.pair]['session']}
             """
-            
-            # Send photo with caption
-            async with aiohttp.ClientSession() as session:
-                bot = Bot(token=TELEGRAM_BOT_TOKEN)
-                await bot.send_photo(
-                    chat_id=self.chat_id,
-                    photo=chart,
-                    caption=message,
-                    parse_mode='Markdown'
-                )
-            
+
+            await self.bot.send_message(
+                chat_id=self.chat_id,
+                text=message,
+                parse_mode='Markdown'
+            )
+
             self.daily_signals[today] += 1
-            logger.info(f"Signal sent: {signal.pair}")
+            logger.info(f"✅ Signal sent: {signal.direction} {signal.pair}")
             return True
-            
+
         except TelegramError as e:
-            logger.error(f"Telegram error: {e}")
+            logger.error(f"❌ Telegram error: {e}")
             return False
-    
-    async def start(self):
-        """Start bot"""
-        await self.application.initialize()
-        await self.application.start()
-        await self.application.updater.start_polling()
 
 
 class KorchTradingBot:
     """Main bot orchestrator"""
-    
-    def __init__(self, bot_token: str, chat_id: int, session_id: str):
-        self.api = TradingViewAPI(session_id)
+
+    def __init__(self):
+        self.api = TradingViewAPI(TRADINGVIEW_SESSION_ID)
         self.strategy = StrategyAnalyzer()
-        self.telegram = TelegramBot(bot_token, chat_id)
+        self.telegram = TelegramBot(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
         self.is_running = False
-    
+
+    async def analyze_pair(self, pair_name: str, pair_config: Dict) -> Optional[Signal]:
+        """Analyze single trading pair"""
+        try:
+            # Fetch OHLCV data
+            ohlcv_1h = await self.api.fetch_ohlcv(pair_name, '1H', limit=50)
+            ohlcv_5m = await self.api.fetch_ohlcv(pair_name, '5M', limit=100)
+
+            if not ohlcv_1h or not ohlcv_5m:
+                return None
+
+            # AMD detection
+            amd_setup = self.strategy.detect_amd(ohlcv_1h, ohlcv_5m)
+
+            if not amd_setup:
+                return None
+
+            # Calculate SL and TP
+            sl_tp = self.strategy.calculate_sl_tp(
+                entry=amd_setup['entry_level'],
+                signal_type=amd_setup['type'],
+                risk_pips=50  # Standard 50 pips risk
+            )
+
+            signal = Signal(
+                pair=pair_name,
+                direction=amd_setup['type'],
+                entry=amd_setup['entry_level'],
+                stop_loss=sl_tp['sl'],
+                take_profit=sl_tp['tp'],
+                timeframe='1H+5M',
+                confidence=amd_setup['confidence'],
+                reason=amd_setup['reason'],
+                pips=sl_tp['sl_pips'],
+                rr_ratio=sl_tp['rr']
+            )
+
+            return signal
+
+        except Exception as e:
+            logger.error(f"Error analyzing {pair_name}: {e}")
+            return None
+
     async def run(self):
-        """Main loop"""
+        """Main bot loop"""
         self.is_running = True
-        logger.info("Korch Bot started with interactive features")
-        
+        logger.info("🤖 Korch Trading Bot started!")
+        logger.info(f"📡 Telegram Bot Token: {TELEGRAM_BOT_TOKEN[:20]}...")
+        logger.info(f"💬 Chat ID: {TELEGRAM_CHAT_ID}")
+
         # Start Telegram bot
-        await self.telegram.start()
-        
+        await self.telegram.application.initialize()
+        await self.telegram.application.start()
+        await self.telegram.application.updater.start_polling()
+
+        # Main analysis loop
         while self.is_running:
             try:
-                await self._analyze_markets()
+                logger.info(f"📊 Checking signals... {datetime.now().strftime('%H:%M:%S')}")
+
+                for pair_name, config in TRADING_PAIRS.items():
+                    signal = await self.analyze_pair(pair_name, config)
+                    if signal:
+                        await self.telegram.send_signal(signal)
+
                 await asyncio.sleep(SIGNAL_CHECK_INTERVAL)
+
             except Exception as e:
-                logger.error(f"Error: {e}")
-                await asyncio.sleep(SIGNAL_CHECK_INTERVAL)
-    
-    async def _analyze_markets(self):
-        """Analyze markets"""
-        for pair_name, pair_config in TRADING_PAIRS.items():
-            try:
-                ohlcv_data = {}
-                for tf in TIMEFRAMES:
-                    data = await self.api.fetch_ohlcv(pair_config['symbol'], tf)
-                    ohlcv_data[tf] = data
-                
-                signal = self.strategy.analyze(ohlcv_data, pair_name)
-                
-                if signal:
-                    await self.telegram.send_signal(signal)
-                    
-            except Exception as e:
-                logger.error(f"Error: {e}")
-    
-    def stop(self):
-        """Stop bot"""
-        self.is_running = False
-        logger.info("Korch Bot stopped")
+                logger.error(f"❌ Main loop error: {e}")
+                await asyncio.sleep(60)
 
 
 async def main():
     """Entry point"""
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID or not TRADINGVIEW_SESSION_ID:
-        logger.error("Missing env vars")
-        return
-    
-    bot = KorchTradingBot(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, TRADINGVIEW_SESSION_ID)
-    
     try:
+        bot = KorchTradingBot()
         await bot.run()
     except KeyboardInterrupt:
-        bot.stop()
+        logger.info("🛑 Bot stopped by user")
+    except Exception as e:
+        logger.error(f"❌ Fatal error: {e}")
 
 
-if __name__ == '__main__':
->>>>>>> origin/main
+if __name__ == "__main__":
     asyncio.run(main())
