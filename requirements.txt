@@ -7,3 +7,4 @@ matplotlib==3.8.0
 Pillow==10.0.0
 yfinance==0.2.32
 pandas==2.0.3
+# Fixed: Ensured aiohttp==3.9.0 (NOT 3.8.7) for Telegram bot compatibility
