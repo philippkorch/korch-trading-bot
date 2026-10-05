@@ -7,4 +7,6 @@ matplotlib==3.8.0
 Pillow==10.0.0
 yfinance==0.2.32
 pandas==2.0.3
-# Build timestamp: 2026-10-05 20:35 UTC - Force fresh build with aiohttp==3.9.0
+# CRITICAL FIX: Ensure aiohttp==3.9.0 is used (not 3.8.7)
+# Build timestamp: 2026-10-05 20:37 UTC
+# Railway GitHub integration sync required - deploy new commit 0cdbd36
