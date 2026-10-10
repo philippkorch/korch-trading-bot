@@ -24,3 +24,4 @@ venv/
 .idea/
 .vscode/
 *.log
+bot_logs.txt
