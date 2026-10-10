@@ -534,7 +534,7 @@ async def back_to_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await start(update, context)
 
 # ===== MAIN =====
-async def main():
+def main():
     """Запуск бота"""
     logger.info("🚀 Starting KORCH Trading Bot v4.0+ with Charts...")
 
@@ -549,10 +549,10 @@ async def main():
     app.add_handler(CallbackQueryHandler(back_to_menu, pattern="^back_to_menu$"))
 
     logger.info("✅ Bot is running! Press Ctrl+C to stop.")
-    await app.run_polling()
+    app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
     try:
-        asyncio.run(main())
+        main()
     except KeyboardInterrupt:
         logger.info("🛑 Bot stopped.")
