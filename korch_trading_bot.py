@@ -173,33 +173,59 @@ class MarketDataAPI:
         Returns:
             List of OHLCV data points
         """
-        try:
-            yf_symbol = pair_config.get('yf_symbol')
-            logger.info(f"Fetching {pair_name} ({yf_symbol}) {timeframe} ({limit} candles)")
+        yf_symbol = pair_config.get('yf_symbol')
+        logger.info(f"Fetching {pair_name} ({yf_symbol}) {timeframe} ({limit} candles)")
 
-            # DEMO MODE - return simulated data instead of real market data
-            if DEMO_MODE:
-                logger.info(f"🎮 DEMO MODE: Generating simulated data for {pair_name}")
+        # DEMO MODE - return simulated data instead of real market data
+        if DEMO_MODE:
+            logger.info(f"🎮 DEMO MODE: Generating simulated data for {pair_name}")
+            return self._generate_demo_data(pair_name, limit)
+
+        # Check cache
+        cache_key = f"{yf_symbol}_{timeframe}"
+        now = datetime.now()
+        if cache_key in self.cache_time:
+            if (now - self.cache_time[cache_key]).total_seconds() < self.cache_duration:
+                logger.info(f"Using cached data for {cache_key}")
+                return self.cache[cache_key]
+
+        # Retry logic for yfinance
+        max_retries = 3
+        retry_delay = 1
+        df = None
+
+        for attempt in range(max_retries):
+            try:
+                ticker = yf.Ticker(yf_symbol)
+                df = ticker.history(period="5d", interval=timeframe)
+
+                if df is not None and not df.empty:
+                    break
+                elif attempt < max_retries - 1:
+                    logger.warning(f"Attempt {attempt + 1}: Empty data, retrying...")
+                    await asyncio.sleep(retry_delay)
+                    retry_delay *= 2
+            except Exception as e:
+                logger.error(f"Attempt {attempt + 1} failed for {yf_symbol}: {e}")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(retry_delay)
+                    retry_delay *= 2
+                else:
+                    df = None
+
+        if df is None or df.empty:
+            logger.warning(f"No data fetched for {yf_symbol} after {max_retries} attempts")
+            # Use last known data or generate demo data as fallback
+            if pair_name in self.last_ohlcv and self.last_ohlcv[pair_name]:
+                logger.info(f"⚠️ Using cached data for {pair_name}")
+                return self.last_ohlcv[pair_name]
+            else:
+                logger.info(f"🎮 Generating demo data for {pair_name} as fallback")
                 return self._generate_demo_data(pair_name, limit)
 
-            # Check cache
-            cache_key = f"{yf_symbol}_{timeframe}"
-            now = datetime.now()
-            if cache_key in self.cache_time:
-                if (now - self.cache_time[cache_key]).total_seconds() < self.cache_duration:
-                    logger.info(f"Using cached data for {cache_key}")
-                    return self.cache[cache_key]
-
-            # Download data from yfinance
-            ticker = yf.Ticker(yf_symbol)
-            df = ticker.history(period="5d", interval=timeframe)
-
-            if df.empty:
-                logger.warning(f"No data fetched for {yf_symbol}")
-                return []
-
-            # Convert to OHLCV objects
-            ohlcv_list = []
+        # Convert to OHLCV objects
+        ohlcv_list = []
+        try:
             for idx, row in df.tail(limit).iterrows():
                 ohlcv = OHLCV(
                     timestamp=idx.to_pydatetime(),
@@ -214,16 +240,14 @@ class MarketDataAPI:
             # Cache the result
             self.cache[cache_key] = ohlcv_list
             self.cache_time[cache_key] = now
-            self.last_ohlcv[pair_name] = ohlcv_list  # Save last successful data
+            self.last_ohlcv[pair_name] = ohlcv_list
 
             logger.info(f"✅ Fetched {len(ohlcv_list)} candles for {pair_name}")
             return ohlcv_list
-
         except Exception as e:
-            logger.error(f"Error fetching {pair_name} ({pair_config.get('yf_symbol')}): {e}")
+            logger.error(f"Error processing data for {pair_name}: {e}")
             # Return last known data if available
             if pair_name in self.last_ohlcv and self.last_ohlcv[pair_name]:
-                logger.info(f"⚠️ Using cached data for {pair_name}")
                 return self.last_ohlcv[pair_name]
             return []
 
@@ -813,44 +837,44 @@ class TelegramBot:
         """Show bot status with strategy confirmation breakdown"""
         uptime = datetime.now().strftime('%H:%M:%S')
 
-        status_text = f"""**🤖 Статус бота v2.1**
+        status_text = f"""🤖 СТАТУС БОТА v2.1
 
-✅ **Статус**: ОНЛАЙН
-⏰ **Время работы**: Запущен
-📡 **Соединение**: Подключено
-🔋 **Здоровье**: Отлично
+✅ Статус: ОНЛАЙН
+⏰ Время работы: Запущен
+📡 Соединение: Подключено
+🔋 Здоровье: Отлично
 
-**📊 Статистика за день**
+📊 СТАТИСТИКА ЗА ДЕНЬ
 📈 Сигналов: 0/5
 💰 P/L: +0%
 📊 Win Rate: N/A
 
-**🎯 Статус стратегии (AMD+FVG+INTELLECT_city)**
+🎯 СТАТУС СТРАТЕГИИ (AMD+FVG+INTELLECT_city)
 
-**1️⃣ AMD (After Market Delivery)**
+1️⃣ AMD (After Market Delivery)
    📌 Тренд: Мониторинг
    📊 Moving Average: MA9 vs MA21
    ✅ Подтверждение: На 1H таймфрейме
 
-**2️⃣ FVG (Fair Value Gap)**
+2️⃣ FVG (Fair Value Gap)
    📌 Структура: Мониторинг
    🎯 Уровни входа: На 5M таймфрейме
    ✅ Подтверждение: Инверсия/BOS
 
-**3️⃣ INTELLECT_city (Smart Money)**
+3️⃣ INTELLECT_city (Smart Money)
    🟢 Статус: 8 компонентов включены
-   📈 Компоненты: RSI, Stochastic, ROSC, WPR, %R, MACD, MFI, JAP
+   📈 Компоненты: RSI, Stochastic, ROSC, WPR, MACD, MFI
    ✅ Порог BUY: ≥60% | ✅ Порог SELL: ≤40%
 
-**🔗 Взаимное подтверждение:**
+🔗 Взаимное подтверждение:
    • AMD определяет тренд (направление)
    • FVG показывает структуру (точка входа)
-   • INTELLECT_city подтверждает согласованность индикаторов
-   • Вместе они образуют надежный торговый сигнал ✅
+   • INTELLECT_city подтверждает согласованность
+   • Вместе образуют надежный сигнал
 
-📡 **Источник данных**: Yahoo Finance
-🌍 **Рыночные часы**: 24/5 (криптовалюта)
-⏱️ **Интервал проверки**: 5 минут
+📡 Источник данных: Yahoo Finance
+🌍 Рыночные часы: 24/5 (криптовалюта)
+⏱️ Интервал проверки: 5 минут
 
 🔄 Последнее обновление: {uptime}
 """
@@ -862,24 +886,24 @@ class TelegramBot:
             await update.callback_query.edit_message_text(
                 status_text,
                 reply_markup=reply_markup,
-                parse_mode='Markdown'
+                parse_mode=None
             )
         except Exception as e:
             logger.error(f"Status handler error: {e}")
             try:
                 await update.callback_query.edit_message_text(
-                    "❌ **Ошибка статуса**",
+                    "❌ Ошибка при загрузке статуса",
                     reply_markup=reply_markup,
-                    parse_mode='Markdown'
+                    parse_mode=None
                 )
             except:
                 pass
 
     async def news_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show forex news and economic calendar"""
-        news_text = "**📰 Новости форекса и экономический календарь**\n\n"
+        news_text = "📰 НОВОСТИ ФОРЕКСА И ЭКОНОМИЧЕСКИЙ КАЛЕНДАРЬ\n\n"
 
-        news_text += "**🌍 Ключевые экономические события:**\n\n"
+        news_text += "🌍 КЛЮЧЕВЫЕ ЭКОНОМИЧЕСКИЕ СОБЫТИЯ:\n\n"
 
         # Группируем события по уровню важности
         critical = []
@@ -893,7 +917,7 @@ class TelegramBot:
 
         # КРИТИЧНЫЕ события (красные)
         if critical:
-            news_text += "**🔴 КРИТИЧНЫЕ СОБЫТИЯ (Опасно для рынка):**\n"
+            news_text += "🔴 КРИТИЧНЫЕ СОБЫТИЯ (Опасно для рынка):\n"
             for event in critical:
                 date_str = f"\n   📅 {event.get('date', 'N/A')}" if 'date' in event else ""
                 time_str = f" | ⏰ {event.get('time', 'N/A')}" if 'time' in event else ""
@@ -903,7 +927,7 @@ class TelegramBot:
 
         # Средней важности (оранжевые)
         if medium:
-            news_text += "**🟠 СРЕДНЯЯ ВАЖНОСТЬ (Внимание):**\n"
+            news_text += "🟠 СРЕДНЯЯ ВАЖНОСТЬ (Внимание):\n"
             for event in medium:
                 date_str = f"\n   📅 {event.get('date', 'N/A')}" if 'date' in event else ""
                 time_str = f" | ⏰ {event.get('time', 'N/A')}" if 'time' in event else ""
@@ -913,7 +937,7 @@ class TelegramBot:
 
         # Нормальные события (зелёные)
         if normal:
-            news_text += "**🟢 НОРМАЛЬНЫЕ СОБЫТИЯ (Всё хорошо):**\n"
+            news_text += "🟢 НОРМАЛЬНЫЕ СОБЫТИЯ (Всё хорошо):\n"
             for event in normal:
                 date_str = f"\n   📅 {event.get('date', 'N/A')}" if 'date' in event else ""
                 time_str = f" | ⏰ {event.get('time', 'N/A')}" if 'time' in event else ""
@@ -921,11 +945,11 @@ class TelegramBot:
                 news_text += f"{event.get('level', '🟢')} {event.get('text', '')}{date_str}{time_str}{impact_str}\n\n"
             news_text += "\n"
 
-        news_text += "---\n\n"
-        news_text += "**📊 Влияние на цены:**\n\n"
+        news_text += "─" * 40 + "\n\n"
+        news_text += "📊 ВЛИЯНИЕ НА ЦЕНЫ:\n\n"
 
         for pair_name, impacts in MARKET_IMPACTS.items():
-            news_text += f"**{pair_name}**\n"
+            news_text += f"{pair_name}\n"
             news_text += f"📈 При росте: {impacts['up']}\n"
             news_text += f"📉 При падении: {impacts['down']}\n\n"
 
@@ -934,11 +958,22 @@ class TelegramBot:
         keyboard = [[InlineKeyboardButton("🔙 В меню", callback_data="menu")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
-        await update.callback_query.edit_message_text(
-            news_text,
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
+        try:
+            await update.callback_query.edit_message_text(
+                news_text,
+                reply_markup=reply_markup,
+                parse_mode=None
+            )
+        except Exception as e:
+            logger.error(f"News handler error: {e}")
+            try:
+                await update.callback_query.edit_message_text(
+                    "❌ Ошибка при загрузке новостей",
+                    reply_markup=reply_markup,
+                    parse_mode=None
+                )
+            except:
+                pass
 
     async def demo_signal_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show example trading signal with AMD+FVG+INTELLECT_city confirmation breakdown"""
