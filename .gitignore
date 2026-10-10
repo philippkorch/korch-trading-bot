@@ -25,3 +25,6 @@ venv/
 .vscode/
 *.log
 bot_logs.txt
+bot_pro.log
+*.db
+korch_signals.db
