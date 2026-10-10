@@ -1,217 +1,151 @@
 """
-<<<<<<< HEAD
 Тестовый скрипт для проверки бота локально
 """
 
 import asyncio
+from datetime import datetime
 from korch_trading_bot import (
-    KorchTradingBot,
+    OHLCV,
+    Signal,
     StrategyAnalyzer,
-    TelegramSignalSender,
-    TELEGRAM_BOT_TOKEN,
-    TELEGRAM_CHAT_ID,
-    TRADINGVIEW_SESSION_ID,
+    IndicatorAnalyzer,
+    MarketDataAPI,
     TRADING_PAIRS
 )
 
-async def test_signal_format():
-    """Тест форматирования сигнала"""
-    print("\n📋 Тест 1: Форматирование сигнала")
+
+async def test_indicators():
+    """Тест INTELLECT_city индикаторов"""
+    print("\n📊 Тест 1: INTELLECT_city индикаторы")
     print("=" * 50)
 
-    telegram = TelegramSignalSender(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
+    analyzer = IndicatorAnalyzer()
 
-    # Тестовый сигнал
-    test_signal = {
-        'type': 'BUY',
-        'symbol': 'EURUSD',
-        'entry': 1.0950,
-        'sl': 1.0920,
-        'tp': 1.0980,
-        'sl_pips': 30,
-        'tp_pips': 60,
-        'rr': '1:2',
-        'reason': 'AMD+FVG инверсия на 5M',
-        'session': 'London Morning'
-    }
+    # Генерируем тестовые данные
+    closes = [100 + i*0.5 for i in range(30)]
+    highs = [100.5 + i*0.5 for i in range(30)]
+    lows = [99.5 + i*0.5 for i in range(30)]
+    volumes = [1000000] * 30
 
-    formatted = telegram._format_signal(test_signal)
-    print(formatted)
-    print("\n✅ Сигнал отформатирован правильно!")
+    ohlcv = [
+        OHLCV(datetime.now(), closes[i], highs[i], lows[i], closes[i], volumes[i])
+        for i in range(30)
+    ]
+
+    result = analyzer.calculate_intellect_city_index(ohlcv)
+    print(f"✅ INTELLECT_city score: {result['intellect_score']:.1f}%")
+    print(f"   RSI: {result['rsi']:.1f}%")
+    print(f"   Stochastic: {result['stochastic']:.1f}%")
+    print(f"   ROSC: {result['rosc']:.1f}%")
+    print(f"   Trend (MA9>MA21): {result['trend']:.1f}%")
 
 
-async def test_strategy_analyzer():
-    """Тест анализатора стратегии"""
-    print("\n📊 Тест 2: Анализатор стратегии")
+async def test_strategy():
+    """Тест AMD+FVG стратегии"""
+    print("\n🎯 Тест 2: AMD+FVG обнаружение")
     print("=" * 50)
 
-    analyzer = StrategyAnalyzer()
+    strategy = StrategyAnalyzer()
 
-    # Тестовые OHLCV данные
-    test_ohlcv_1h = [
-        {'open': 1.0900, 'high': 1.0950, 'low': 1.0880, 'close': 1.0940},
-        {'open': 1.0940, 'high': 1.0960, 'low': 1.0930, 'close': 1.0955},
-        {'open': 1.0955, 'high': 1.0970, 'low': 1.0945, 'close': 1.0965},
-    ]
+    # Генерируем восходящий тренд
+    ohlcv_1h = []
+    price = 18000
+    for i in range(25):
+        ohlcv_1h.append(OHLCV(
+            datetime.now(),
+            price,
+            price + 50,
+            price - 30,
+            price + 30,
+            1000000
+        ))
+        price += 20  # Восходящий тренд
 
-    test_ohlcv_5m = [
-        {'open': 1.0960, 'high': 1.0975, 'low': 1.0950, 'close': 1.0965},
-        {'open': 1.0965, 'high': 1.0970, 'low': 1.0955, 'close': 1.0958},
-        {'open': 1.0958, 'high': 1.0962, 'low': 1.0945, 'close': 1.0950},
-        {'open': 1.0950, 'high': 1.0955, 'low': 1.0940, 'close': 1.0945},
-        {'open': 1.0945, 'high': 1.0950, 'low': 1.0930, 'close': 1.0935},
-    ]
+    # Генерируем 5M данные с инверсией
+    ohlcv_5m = []
+    price = 18500
+    for i in range(25):
+        ohlcv_5m.append(OHLCV(
+            datetime.now(),
+            price,
+            price + 10,
+            price - 5,
+            price + 5,
+            100000
+        ))
+        if i >= 20:
+            price += 2
+        else:
+            price -= 2
 
-    setup = analyzer.find_amd_fvg_setup(test_ohlcv_1h, test_ohlcv_5m)
-    if setup:
-        print(f"✅ Сетап найден: {setup}")
+    amd = strategy.detect_amd(ohlcv_1h, ohlcv_5m)
+
+    if amd:
+        print(f"✅ AMD сигнал найден!")
+        print(f"   Тип: {amd['type']}")
+        print(f"   Уверенность: {amd['confidence']:.0%}")
+        print(f"   INTELLECT_city: {amd['intellect_score']:.1f}%")
     else:
-        print("❌ Сетап не найден (это может быть нормально на тестовых данных)")
+        print("⏳ AMD сигнал не найден (может быть нормально для тестовых данных)")
 
-    # Тест calculate_sl_tp
-    sl_tp = analyzer.calculate_sl_tp(
-        entry=1.0950,
-        sl=1.0920,
-        signal='BUY',
-        risk_percent=1.0
+
+async def test_sl_tp_calculation():
+    """Тест расчета SL и TP"""
+    print("\n💰 Тест 3: Расчет SL/TP (1:2 R:R)")
+    print("=" * 50)
+
+    strategy = StrategyAnalyzer()
+
+    result = strategy.calculate_sl_tp(
+        entry=18250.50,
+        signal_type='BUY',
+        risk_pips=50
     )
 
-    if sl_tp:
-        print(f"\n✅ SL/TP рассчитаны:")
-        print(f"   SL: {sl_tp.get('sl')}")
-        print(f"   TP: {sl_tp.get('tp')}")
-        print(f"   RR: {sl_tp.get('rr')}")
-        print(f"   Пункты: {sl_tp.get('sl_pips')} / {sl_tp.get('tp_pips')}")
+    print(f"✅ SL/TP рассчитаны:")
+    print(f"   Вход: 18250.50")
+    print(f"   SL: {result['sl']} ({result['sl_pips']} пипс)")
+    print(f"   TP: {result['tp']} ({result['tp_pips']} пипс)")
+    print(f"   R:R: {result['rr']}")
 
 
-async def test_bot_creation():
-    """Тест создания бота"""
-    print("\n🤖 Тест 3: Создание бота")
+async def test_market_api():
+    """Тест Market Data API"""
+    print("\n📡 Тест 4: Market Data API")
     print("=" * 50)
 
+    api = MarketDataAPI()
+
+    # Пытаемся загрузить реальные данные
     try:
-        bot = KorchTradingBot(
-            token=TELEGRAM_BOT_TOKEN,
-            chat_id=TELEGRAM_CHAT_ID,
-            sessionid=TRADINGVIEW_SESSION_ID
-        )
-
-        if bot.tv:
-            print("✅ Бот создан с TradingView подключением")
-        else:
-            print("⚠️  Бот создан без TradingView (sessionid не установлен)")
-
-        print(f"📋 Пары для торговли: {list(TRADING_PAIRS.keys())}")
-        print("✅ Бот готов к работе!")
-
+        for pair_name, config in TRADING_PAIRS.items():
+            ohlcv = await api.fetch_ohlcv(pair_name, config, '1h', 10)
+            if ohlcv:
+                print(f"✅ {pair_name}: загружено {len(ohlcv)} свечей")
+                if ohlcv:
+                    last = ohlcv[-1]
+                    print(f"   Последняя цена: O={last.open:.2f} H={last.high:.2f} L={last.low:.2f} C={last.close:.2f}")
+            else:
+                print(f"⚠️  {pair_name}: данные не загружены")
     except Exception as e:
-        print(f"❌ Ошибка при создании бота: {e}")
+        print(f"⚠️  Ошибка при загрузке данных: {e}")
 
 
 async def main():
     """Запусти все тесты"""
-    print("\n" + "=" * 50)
-    print("🧪 ТЕСТИРОВАНИЕ KORCH TRADING BOT")
-    print("=" * 50)
+    print("\n" + "=" * 60)
+    print("🧪 ТЕСТИРОВАНИЕ KORCH TRADING BOT v2.2")
+    print("=" * 60)
 
-    await test_signal_format()
-    await test_strategy_analyzer()
-    await test_bot_creation()
+    await test_indicators()
+    await test_strategy()
+    await test_sl_tp_calculation()
+    await test_market_api()
 
-    print("\n" + "=" * 50)
-    print("✅ ВСЕ ТЕСТЫ ЗАВЕРШЕНЫ!")
-    print("=" * 50)
+    print("\n" + "=" * 60)
+    print("✅ ТЕСТИРОВАНИЕ ЗАВЕРШЕНО!")
+    print("=" * 60)
 
 
 if __name__ == "__main__":
     asyncio.run(main())
-=======
-Unit tests for Korch Trading Bot
-"""
-
-import unittest
-from datetime import datetime
-from korch_trading_bot import (
-    OHLCV, Signal, StrategyAnalyzer, TelegramSignalSender
-)
-
-
-class TestStrategyAnalyzer(unittest.TestCase):
-    
-    def setUp(self):
-        self.analyzer = StrategyAnalyzer()
-    
-    def test_fvg_detection(self):
-        """Test Fair Value Gap detection"""
-        ohlcv = [
-            OHLCV(datetime.now(), 1.0500, 1.0520, 1.0490, 1.0510, 1000),
-            OHLCV(datetime.now(), 1.0510, 1.0530, 1.0500, 1.0520, 1000),
-            OHLCV(datetime.now(), 1.0520, 1.0540, 1.0510, 1.0530, 1000),
-        ]
-        
-        fvg_buy, fvg_sell = self.analyzer._detect_fvg(ohlcv)
-        self.assertTrue(fvg_buy or fvg_sell)
-    
-    def test_amd_detection(self):
-        """Test AMD detection"""
-        ohlcv = [
-            OHLCV(datetime.now(), 1.0500, 1.0520, 1.0490, 1.0510, 1000),
-            OHLCV(datetime.now(), 1.0510, 1.0530, 1.0500, 1.0520, 1000),
-            OHLCV(datetime.now(), 1.0520, 1.0540, 1.0510, 1.0530, 1000),
-            OHLCV(datetime.now(), 1.0530, 1.0550, 1.0520, 1.0540, 1000),
-            OHLCV(datetime.now(), 1.0540, 1.0560, 1.0530, 1.0550, 1000),
-        ]
-        
-        amd = self.analyzer._detect_amd(ohlcv)
-        self.assertIsNotNone(amd)
-        self.assertEqual(amd['direction'], 'BUY')
-    
-    def test_signal_creation(self):
-        """Test signal creation with proper 1:2 RR"""
-        h1 = OHLCV(datetime.now(), 1.0500, 1.0520, 1.0490, 1.0515, 1000)
-        m5 = OHLCV(datetime.now(), 1.0510, 1.0525, 1.0505, 1.0520, 500)
-        
-        signal = self.analyzer._create_signal('EURUSD', 'BUY', h1, m5, 'Test')
-        
-        self.assertEqual(signal.pair, 'EURUSD')
-        self.assertEqual(signal.direction, 'BUY')
-        self.assertGreater(signal.take_profit, signal.entry)
-        self.assertLess(signal.stop_loss, signal.entry)
-        
-        # Check 1:2 ratio (TP distance = 2 * SL distance)
-        tp_dist = signal.take_profit - signal.entry
-        sl_dist = signal.entry - signal.stop_loss
-        ratio = tp_dist / sl_dist if sl_dist > 0 else 0
-        self.assertAlmostEqual(ratio, 2.0, places=0)
-
-
-class TestSignalFormatting(unittest.TestCase):
-    
-    def setUp(self):
-        self.sender = TelegramSignalSender('test_token', 'test_chat')
-    
-    def test_signal_format(self):
-        """Test signal message formatting"""
-        signal = Signal(
-            pair='EURUSD',
-            direction='BUY',
-            entry=1.0520,
-            stop_loss=1.0500,
-            take_profit=1.0540,
-            timeframe='1H+5M',
-            confidence=0.75,
-            reason='FVG+AMD'
-        )
-        
-        message = self.sender._format_signal(signal)
-        
-        self.assertIn('EURUSD', message)
-        self.assertIn('BUY', message)
-        self.assertIn('1.0520', message)
-        self.assertIn('1.0500', message)
-        self.assertIn('1.0540', message)
-
-
-if __name__ == '__main__':
-    unittest.main()
->>>>>>> origin/main

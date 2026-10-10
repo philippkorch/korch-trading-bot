@@ -1215,19 +1215,10 @@ class KorchTradingBot:
             logger.error(f"Error analyzing {pair_name}: {e}")
             return None
 
-    async def run(self):
-        """Main bot loop"""
-        self.is_running = True
-        logger.info("🤖 Korch Trading Bot started!")
-        logger.info(f"📡 Telegram Bot Token: {TELEGRAM_BOT_TOKEN[:20]}...")
-        logger.info(f"💬 Chat ID: {TELEGRAM_CHAT_ID}")
+    async def signal_check_loop(self):
+        """Background loop for checking trading signals"""
+        logger.info("📊 Signal analysis loop started")
 
-        # Start Telegram bot
-        await self.telegram.application.initialize()
-        await self.telegram.application.start()
-        await self.telegram.application.updater.start_polling()
-
-        # Main analysis loop
         while self.is_running:
             try:
                 logger.info(f"📊 Checking signals... {datetime.now().strftime('%H:%M:%S')}")
@@ -1240,8 +1231,47 @@ class KorchTradingBot:
                 await asyncio.sleep(SIGNAL_CHECK_INTERVAL)
 
             except Exception as e:
-                logger.error(f"❌ Main loop error: {e}")
+                logger.error(f"❌ Signal loop error: {e}")
                 await asyncio.sleep(60)
+
+    async def run(self):
+        """Main bot loop - runs Telegram polling and signal analysis concurrently"""
+        self.is_running = True
+        logger.info("🤖 Korch Trading Bot started!")
+        logger.info(f"📡 Telegram Bot Token: {TELEGRAM_BOT_TOKEN[:20]}...")
+        logger.info(f"💬 Chat ID: {TELEGRAM_CHAT_ID}")
+
+        try:
+            # Initialize Telegram bot
+            await self.telegram.application.initialize()
+            await self.telegram.application.start()
+
+            # Run polling and signal analysis concurrently
+            logger.info("🚀 Starting polling and analysis loops...")
+
+            # Create tasks for both operations
+            polling_task = asyncio.create_task(
+                self.telegram.application.updater.start_polling()
+            )
+
+            signal_task = asyncio.create_task(
+                self.signal_check_loop()
+            )
+
+            # Wait for both tasks (they run forever unless stopped)
+            await asyncio.gather(polling_task, signal_task)
+
+        except Exception as e:
+            logger.error(f"❌ Fatal error in main loop: {e}")
+        finally:
+            self.is_running = False
+            logger.info("🛑 Shutting down bot...")
+            try:
+                await self.telegram.application.updater.stop()
+                await self.telegram.application.stop()
+                await self.telegram.application.shutdown()
+            except:
+                pass
 
 
 async def main():
