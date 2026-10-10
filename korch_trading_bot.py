@@ -717,15 +717,19 @@ class TelegramBot:
 
         keyboard = [
             [
-                InlineKeyboardButton("📈 Анализ", callback_data="analysis"),
-                InlineKeyboardButton("📰 Новости", callback_data="news")
+                InlineKeyboardButton("📊 GER40 анализ", callback_data="ger40_signal"),
+                InlineKeyboardButton("₿ BTC анализ", callback_data="btc_signal")
             ],
             [
-                InlineKeyboardButton("📊 Статус", callback_data="status"),
-                InlineKeyboardButton("📢 Сигналы", callback_data="signals")
+                InlineKeyboardButton("🏆 GOLD анализ", callback_data="gold_signal"),
+                InlineKeyboardButton("📈 Анализ", callback_data="analysis")
             ],
             [
-                InlineKeyboardButton("🔔 Демо-сигнал", callback_data="demo_signal"),
+                InlineKeyboardButton("📰 Новости", callback_data="news"),
+                InlineKeyboardButton("📊 Статус", callback_data="status")
+            ],
+            [
+                InlineKeyboardButton("📢 Сигналы", callback_data="signals"),
                 InlineKeyboardButton("ℹ️ Инфо", callback_data="info")
             ]
         ]
@@ -1048,6 +1052,143 @@ class TelegramBot:
             parse_mode='Markdown'
         )
 
+    async def analyze_pair_signal(self, pair_name: str, pair_config: Dict) -> Optional[Dict]:
+        """
+        Analyze a trading pair and generate real signal using AMD+FVG+INTELLECT_city
+
+        Returns signal dict with all details or None if no signal detected
+        """
+        try:
+            # Fetch real market data
+            ohlcv_1h = await self.api.fetch_ohlcv(pair_name, pair_config, '1h', 21)
+            ohlcv_5m = await self.api.fetch_ohlcv(pair_name, pair_config, '5m', 30)
+
+            if not ohlcv_1h or len(ohlcv_1h) < 21 or not ohlcv_5m or len(ohlcv_5m) < 30:
+                logger.warning(f"Insufficient data for {pair_name}: 1H={len(ohlcv_1h) if ohlcv_1h else 0}, 5M={len(ohlcv_5m) if ohlcv_5m else 0}")
+                return None
+
+            # Use StrategyAnalyzer to detect signals
+            strategy = StrategyAnalyzer()
+            amd_result = strategy.detect_amd(ohlcv_1h, ohlcv_5m)
+
+            if not amd_result:
+                logger.info(f"No AMD signal detected for {pair_name}")
+                return None
+
+            # Get current price (entry)
+            current_price = ohlcv_1h[-1].close
+
+            # Determine risk pips based on pair
+            risk_pips_map = {
+                'GER40': 50,   # 50 pips for indices
+                'BTC': 500,    # 500 pips for Bitcoin
+                'GOLD': 50,    # 50 pips for GOLD
+            }
+            risk_pips = risk_pips_map.get(pair_name, 50)
+
+            # Calculate SL/TP
+            sl_tp = strategy.calculate_sl_tp(current_price, amd_result['type'], risk_pips)
+
+            # Build full signal info
+            signal_info = {
+                'pair': pair_name,
+                'type': amd_result['type'],
+                'entry': current_price,
+                'sl': sl_tp['sl'],
+                'tp': sl_tp['tp'],
+                'sl_pips': sl_tp['sl_pips'],
+                'tp_pips': sl_tp['tp_pips'],
+                'rr': sl_tp['rr'],
+                'confidence': amd_result.get('confidence', 0.75),
+                'intellect_score': amd_result.get('intellect_score', 50),
+                'reason': amd_result.get('reason', 'AMD Signal Detected'),
+                'timestamp': datetime.now().strftime('%H:%M:%S'),
+            }
+
+            logger.info(f"✅ Signal generated for {pair_name}: {signal_info['type']} at {current_price}")
+            return signal_info
+
+        except Exception as e:
+            logger.error(f"Error analyzing {pair_name}: {e}")
+            return None
+
+    async def pair_signal_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE, pair_name: str):
+        """Generic handler for pair signal analysis"""
+        query = update.callback_query
+
+        try:
+            # Show loading message
+            await query.edit_message_text(f"⏳ Анализирую {pair_name}...", parse_mode=None)
+
+            pair_config = TRADING_PAIRS.get(pair_name)
+            if not pair_config:
+                await query.edit_message_text(
+                    f"❌ Пара {pair_name} не найдена",
+                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 В меню", callback_data="menu")]]),
+                    parse_mode=None
+                )
+                return
+
+            # Analyze the pair
+            signal_info = await self.analyze_pair_signal(pair_name, pair_config)
+
+            if not signal_info:
+                # No signal found
+                text = f"🟡 {pair_name}\n\n❌ Сигнал не найден\n\nУсловия AMD+FVG+INTELLECT_city не совпадают.\nПопробуйте позже (обновляется каждые 5 минут)"
+                kb = [[InlineKeyboardButton("🔙 В меню", callback_data="menu")]]
+                await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(kb), parse_mode=None)
+                return
+
+            # Format signal result
+            signal_type_emoji = "🟢" if signal_info['type'] == "BUY" else "🔴"
+            signal_text = f"""{signal_type_emoji} **{signal_info['type']} {pair_name}**
+
+⏱️ Таймфрейм: 1H + 5M
+🎲 Уверенность: {signal_info['confidence']:.0%}
+
+---
+
+**🎯 Подтверждение стратегий:**
+
+**1️⃣ AMD (After Market Delivery)**
+   Тренд подтвержден ✅
+
+**2️⃣ FVG (Fair Value Gap)**
+   Структура найдена ✅
+
+**3️⃣ INTELLECT_city (Композитный индекс)**
+   🟢 Результат: {signal_info['intellect_score']:.0f}% ✅
+   Пороговое значение: ≥60% для BUY / ≤40% для SELL
+
+---
+
+**💰 Детали входа:**
+Цена входа: {signal_info['entry']:.2f}
+Stop Loss: {signal_info['sl']:.5f} ({signal_info['sl_pips']:.0f} пипс)
+Take Profit: {signal_info['tp']:.5f} ({signal_info['tp_pips']:.0f} пипс)
+R:R: {signal_info['rr']}
+
+⏰ Время: {signal_info['timestamp']}
+
+---
+
+💡 Сигнал: {signal_info['reason']}
+            """
+
+            kb = [[InlineKeyboardButton("🔙 В меню", callback_data="menu")]]
+            await query.edit_message_text(signal_text, reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown')
+
+        except Exception as e:
+            logger.error(f"Error in pair_signal_handler for {pair_name}: {e}")
+            try:
+                await query.edit_message_text(
+                    f"❌ Ошибка при анализе {pair_name}\n\nПопробуйте позже",
+                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 В меню", callback_data="menu")]]),
+                    parse_mode=None
+                )
+            except:
+                pass
+
     async def button_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle button presses"""
         query = update.callback_query
@@ -1059,6 +1200,12 @@ class TelegramBot:
             await self.news_handler(update, context)
         elif query.data == "demo_signal":
             await self.demo_signal_handler(update, context)
+        elif query.data == "ger40_signal":
+            await self.pair_signal_handler(update, context, "GER40")
+        elif query.data == "btc_signal":
+            await self.pair_signal_handler(update, context, "BTC")
+        elif query.data == "gold_signal":
+            await self.pair_signal_handler(update, context, "GOLD")
         elif query.data == "signals":
             keyboard = [[InlineKeyboardButton("🔙 В меню", callback_data="menu")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
