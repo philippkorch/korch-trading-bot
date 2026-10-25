@@ -40,7 +40,7 @@
 ## 📋 Обязательные Переменные Окружения
 
 ```bash
-TELEGRAM_BOT_TOKEN=8999356089:AAEzV2onmpC6oFe-j9M26UTFLxU14N6fSCs
+TELEGRAM_BOT_TOKEN=YOUR_BOT_TOKEN
 TELEGRAM_CHAT_ID=8999356089
 ```
 
@@ -75,7 +75,7 @@ railway init
 ### 3. Конфигурация Railway
 ```bash
 # Через Railway CLI:
-railway variable set TELEGRAM_BOT_TOKEN 8999356089:AAEzV2onmpC6oFe-j9M26UTFLxU14N6fSCs
+railway variable set TELEGRAM_BOT_TOKEN YOUR_BOT_TOKEN
 railway variable set TELEGRAM_CHAT_ID 8999356089
 
 # Или через Dashboard:
@@ -270,7 +270,7 @@ python test_intellect_city.py
 ```bash
 # Вариант 1: Railway CLI
 railway init
-railway variable set TELEGRAM_BOT_TOKEN "8999356089:AAEzV2onmpC6oFe-j9M26UTFLxU14N6fSCs"
+railway variable set TELEGRAM_BOT_TOKEN "YOUR_BOT_TOKEN"
 railway variable set TELEGRAM_CHAT_ID "8999356089"
 railway up
 

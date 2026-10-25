@@ -1,0 +1,371 @@
+//@version=6
+// KORCH AMD + FVG — сигналы по Setup №1 из Notion («Торговая стратегия / Техническая часть»)
+// График: GER40, 5M. Алерты уходят прямо в Telegram через webhook (без сервера).
+//
+// Логика (лонг; шорт зеркально):
+//  1. Тренд: дневка вверх (закрытие выше EMA, EMA растёт) и часовик с восходящим моментумом.
+//  2. В тайминг (Frankfurt / London) снята ликвидность: PDL, low ночного диапазона или 5M swing low.
+//     Бонус: снятие внутри бычьего FVG на HTF (1H / 4H).
+//  3. Модель входа на 5M: BOS, инверсия медвежьего FVG или бычье поглощение.
+//  4. Вход не выше структурного максимума HTF.
+//  5. Пропуск: дневка в боковике, основное движение дня уже ушло.
+//  Стоп за экстремумом снятия, тейк = RR 2, риск 1% (Risk Management).
+indicator("KORCH AMD+FVG — сигналы", shorttitle = "KORCH AMD+FVG", overlay = true, max_lines_count = 300, max_labels_count = 300)
+
+// ───────── Inputs ─────────
+grpT = "Тайминг (как в Notion)"
+tz       = input.string("Asia/Jerusalem", "Часовой пояс таймингов", group = grpT, tooltip = "IANA-зона, в которой записаны времена сессий. Например Asia/Jerusalem, Europe/Kyiv, Europe/Berlin")
+sessFra  = input.session("0900-1100", "Frankfurt", group = grpT)
+sessLon  = input.session("1000-1300", "London", group = grpT)
+useFra   = input.bool(true, "Торговать Frankfurt", group = grpT)
+useLon   = input.bool(true, "Торговать London", group = grpT)
+sessAsia = input.session("0100-0900", "Ночной диапазон (ликвидность)", group = grpT)
+
+grpTr = "Тренд и HTF"
+dEmaLen = input.int(20, "EMA дневки", minval = 2, group = grpTr)
+hEmaLen = input.int(20, "EMA часовика (моментум)", minval = 2, group = grpTr)
+htfTf   = input.timeframe("60", "HTF для FVG и структуры", group = grpTr, tooltip = "60 = 1H, 240 = 4H")
+dirMode = input.string("Оба", "Направление", options = ["Оба", "Только лонг", "Только шорт"], group = grpTr)
+
+grpS = "Сетап"
+needFvg   = input.bool(false, "Снятие только внутри HTF FVG", group = grpS)
+useBos    = input.bool(true, "Модель: BOS (слом структуры)", group = grpS)
+useInv    = input.bool(true, "Модель: инверсия FVG", group = grpS)
+useEng    = input.bool(true, "Модель: поглощение", group = grpS)
+pivLen    = input.int(3, "Длина свинга 5M", minval = 1, group = grpS)
+maxWait   = input.int(12, "Ждать модель после снятия, баров 5M", minval = 1, group = grpS)
+movedPct  = input.float(80, "Пропуск: диапазон дня уже больше % от ATR(14) D1", minval = 10, group = grpS)
+
+grpR = "Риск (Notion: RR 2, риск 1%)"
+rr       = input.float(2.0, "RR", minval = 0.5, step = 0.5, group = grpR)
+bufTicks = input.int(5, "Буфер за стопом, тиков", minval = 0, group = grpR)
+balance  = input.float(10000, "Депозит", minval = 1, group = grpR)
+riskPct  = input.float(1.0, "Риск на сделку, %", minval = 0.1, step = 0.1, group = grpR)
+
+grpA = "Telegram"
+chatId     = input.string("YOUR_CHAT_ID", "Chat ID", group = grpA, tooltip = "Твой личный chat id (число). Узнать: написать боту @userinfobot")
+sendSweep  = input.bool(true, "Предупреждать о снятии ликвидности", group = grpA)
+sendSkip   = input.bool(false, "Сообщать о пропущенных сетапах", group = grpA)
+
+// ───────── Helpers ─────────
+f(x) => str.tostring(x, format.mintick)
+p(x) => str.tostring(x, "#.#")
+NL = "\\n"   // перенос строки внутри JSON
+
+tg(string txt) =>
+    '{"chat_id":"' + chatId + '","parse_mode":"HTML","text":"' + txt + '"}'
+
+// ───────── HTF data (без перерисовки: значения закрытых баров) ─────────
+[dC, dE, dE1, pdh, pdl, dAtr] = request.security(syminfo.tickerid, "D", [close[1], ta.ema(close, dEmaLen)[1], ta.ema(close, dEmaLen)[2], high[1], low[1], ta.atr(14)[1]], lookahead = barmerge.lookahead_on)
+[hC, hE, hE1] = request.security(syminfo.tickerid, "60", [close[1], ta.ema(close, hEmaLen)[1], ta.ema(close, hEmaLen)[2]], lookahead = barmerge.lookahead_on)
+
+htfData() =>
+    ph = ta.pivothigh(high, 2, 2)
+    pl = ta.pivotlow(low, 2, 2)
+    var float swH = na
+    var float swL = na
+    if not na(ph)
+        swH := ph
+    if not na(pl)
+        swL := pl
+    var float bTop = na
+    var float bBot = na
+    var float sTop = na
+    var float sBot = na
+    if low > high[2]
+        bTop := low
+        bBot := high[2]
+    if high < low[2]
+        sTop := low[2]
+        sBot := high
+    if not na(bBot) and close < bBot
+        bTop := na
+        bBot := na
+    if not na(sTop) and close > sTop
+        sTop := na
+        sBot := na
+    [swH[1], swL[1], bTop[1], bBot[1], sTop[1], sBot[1]]
+
+[hSwH, hSwL, hBTop, hBBot, hSTop, hSBot] = request.security(syminfo.tickerid, htfTf, htfData(), lookahead = barmerge.lookahead_on)
+
+upD = dC > dE and dE > dE1
+dnD = dC < dE and dE < dE1
+upH = hC > hE and hE > hE1
+dnH = hC < hE and hE < hE1
+longTrend  = upD and upH
+shortTrend = dnD and dnH
+canLong  = dirMode != "Только шорт"
+canShort = dirMode != "Только лонг"
+
+// ───────── Сессии ─────────
+inFra = useFra and not na(time(timeframe.period, sessFra, tz))
+inLon = useLon and not na(time(timeframe.period, sessLon, tz))
+inKZ  = inFra or inLon
+kzStart = inKZ and not inKZ[1]
+sessName = inFra and inLon ? "Frankfurt + London" : inFra ? "Frankfurt" : "London"
+bgcolor(inKZ ? color.new(color.blue, 92) : na, title = "Тайминг")
+
+// ───────── День: диапазон и снятие PDH/PDL ─────────
+newDay = timeframe.change("D")
+var float dayHi = na
+var float dayLo = na
+var bool pdhTaken = false
+var bool pdlTaken = false
+if newDay
+    dayHi := high
+    dayLo := low
+    pdhTaken := false
+    pdlTaken := false
+else
+    dayHi := math.max(nz(dayHi, high), high)
+    dayLo := math.min(nz(dayLo, low), low)
+moved = not na(dAtr) and (dayHi - dayLo) > dAtr * movedPct / 100
+
+// ───────── Ночной диапазон ─────────
+inAsia = not na(time(timeframe.period, sessAsia, tz))
+var float asiaH = na
+var float asiaL = na
+var bool asiaHTaken = false
+var bool asiaLTaken = false
+if inAsia and not inAsia[1]
+    asiaH := high
+    asiaL := low
+    asiaHTaken := false
+    asiaLTaken := false
+else if inAsia
+    asiaH := math.max(asiaH, high)
+    asiaL := math.min(asiaL, low)
+
+// ───────── 5M свинги ─────────
+ph5 = ta.pivothigh(high, pivLen, pivLen)
+pl5 = ta.pivotlow(low, pivLen, pivLen)
+var float lastPH = na
+var float lastPL = na
+if not na(ph5)
+    lastPH := ph5
+if not na(pl5)
+    lastPL := pl5
+prevPH = lastPH
+prevPL = lastPL
+
+// ───────── 5M FVG (для инверсии) ─────────
+var float bearFvgTop = na
+var int   bearFvgBar = na
+var float bullFvgBot = na
+var int   bullFvgBar = na
+if high < low[2]
+    bearFvgTop := low[2]
+    bearFvgBar := bar_index
+if low > high[2]
+    bullFvgBot := high[2]
+    bullFvgBar := bar_index
+
+// ───────── Снятие ликвидности в тайминг ─────────
+liqL = ""
+liqS = ""
+if inKZ
+    if not na(pdl) and low < pdl and not pdlTaken
+        liqL := "PDL " + f(pdl)
+    else if not na(asiaL) and not inAsia and low < asiaL and not asiaLTaken
+        liqL := "low ночного диапазона " + f(asiaL)
+    else if not na(prevPL) and low < prevPL
+        liqL := "5M swing low " + f(prevPL)
+    if not na(pdh) and high > pdh and not pdhTaken
+        liqS := "PDH " + f(pdh)
+    else if not na(asiaH) and not inAsia and high > asiaH and not asiaHTaken
+        liqS := "high ночного диапазона " + f(asiaH)
+    else if not na(prevPH) and high > prevPH
+        liqS := "5M swing high " + f(prevPH)
+
+// отметить снятые уровни (в любое время — снятая ликвидность больше не цель)
+if not na(pdl) and low < pdl
+    pdlTaken := true
+if not na(pdh) and high > pdh
+    pdhTaken := true
+if not inAsia and not na(asiaL) and low < asiaL
+    asiaLTaken := true
+if not inAsia and not na(asiaH) and high > asiaH
+    asiaHTaken := true
+if not na(lastPL) and low < lastPL
+    lastPL := na
+if not na(lastPH) and high > lastPH
+    lastPH := na
+
+// ───────── Состояние сетапа ─────────
+var bool   lArmed = false
+var bool   lDone  = false
+var float  lExt   = na
+var int    lBar   = na
+var string lLiq   = ""
+var float  lBos   = na
+var bool   sArmed = false
+var bool   sDone  = false
+var float  sExt   = na
+var int    sBar   = na
+var string sLiq   = ""
+var float  sBos   = na
+
+if kzStart
+    lArmed := false
+    lDone  := false
+    sArmed := false
+    sDone  := false
+
+freshL = false
+if inKZ and liqL != "" and not lDone
+    freshL := not lArmed
+    lArmed := true
+    lExt   := low
+    lBar   := bar_index
+    lLiq   := liqL
+    lBos   := prevPH
+else if lArmed
+    lExt := math.min(lExt, low)
+
+freshS = false
+if inKZ and liqS != "" and not sDone
+    freshS := not sArmed
+    sArmed := true
+    sExt   := high
+    sBar   := bar_index
+    sLiq   := liqS
+    sBos   := prevPL
+else if sArmed
+    sExt := math.max(sExt, high)
+
+if lArmed and (not inKZ or bar_index - lBar > maxWait)
+    lArmed := false
+if sArmed and (not inKZ or bar_index - sBar > maxWait)
+    sArmed := false
+
+// инверсии
+invUp = false
+if not na(bearFvgTop) and bar_index > bearFvgBar and close > bearFvgTop
+    invUp := lArmed and bearFvgBar >= lBar - maxWait
+    bearFvgTop := na
+invDn = false
+if not na(bullFvgBot) and bar_index > bullFvgBar and close < bullFvgBot
+    invDn := sArmed and bullFvgBar >= sBar - maxWait
+    bullFvgBot := na
+
+engUp = close > open and close[1] < open[1] and close >= open[1] and open <= close[1]
+engDn = close < open and close[1] > open[1] and close <= open[1] and open >= close[1]
+
+// ───────── Предупреждение о снятии ─────────
+if sendSweep and freshL and canLong and longTrend and not moved
+    alert(tg("⚠️ <b>" + syminfo.ticker + "</b> · снятие ликвидности (лонг-сценарий)" + NL + "⏰ " + sessName + " " + str.format_time(time_close, "HH:mm", tz) + NL + "💧 " + lLiq + NL + "📈 Тренд D1 ↑, H1 ↑" + NL + "Жди модель входа на 5M: BOS / инверсия / поглощение"), alert.freq_once_per_bar_close)
+if sendSweep and freshS and canShort and shortTrend and not moved
+    alert(tg("⚠️ <b>" + syminfo.ticker + "</b> · снятие ликвидности (шорт-сценарий)" + NL + "⏰ " + sessName + " " + str.format_time(time_close, "HH:mm", tz) + NL + "💧 " + sLiq + NL + "📉 Тренд D1 ↓, H1 ↓" + NL + "Жди модель входа на 5M: BOS / инверсия / поглощение"), alert.freq_once_per_bar_close)
+
+// ───────── Модели входа и фильтры ─────────
+modelL = ""
+if lArmed and barstate.isconfirmed
+    if useBos and not na(lBos) and close > lBos and close[1] <= lBos
+        modelL := "BOS выше " + f(lBos)
+    else if useInv and invUp
+        modelL := "инверсия медвежьего FVG"
+    else if useEng and engUp
+        modelL := "бычье поглощение"
+
+modelS = ""
+if sArmed and barstate.isconfirmed
+    if useBos and not na(sBos) and close < sBos and close[1] >= sBos
+        modelS := "BOS ниже " + f(sBos)
+    else if useInv and invDn
+        modelS := "инверсия бычьего FVG"
+    else if useEng and engDn
+        modelS := "медвежье поглощение"
+
+skipReason(bool trendOk, bool structOk, bool fvgOk, string side) =>
+    string r = ""
+    if not trendOk
+        r := "сделка против тренда / дневка в боковике"
+    else if moved
+        r := "основное движение дня уже ушло"
+    else if not structOk
+        r := side == "L" ? "вход выше структурного максимума HTF" : "вход ниже структурного минимума HTF"
+    else if needFvg and not fvgOk
+        r := "снятие не внутри HTF FVG"
+    r
+
+riskMoney = balance * riskPct / 100
+
+// LONG
+if modelL != ""
+    sl   = lExt - bufTicks * syminfo.mintick
+    risk = close - sl
+    tp   = close + rr * risk
+    fvgL = not na(hBTop) and lExt <= hBTop and lExt >= hBBot
+    structL = na(hSwH) or close < hSwH
+    why = skipReason(longTrend and canLong, structL, fvgL, "L")
+    if risk <= 0
+        why := "некорректный стоп"
+    if why == ""
+        lDone  := true
+        lArmed := false
+        warn = ""
+        if not pdlTaken and not na(pdl) and pdl < sl and sl - pdl <= risk
+            warn := NL + "⚠️ Под стопом неснятый PDL " + f(pdl) + " — по правилам Skip сделку лучше пропустить"
+        else if not asiaLTaken and not na(asiaL) and asiaL < sl and sl - asiaL <= risk
+            warn := NL + "⚠️ Под стопом неснятый low ночи " + f(asiaL) + " — по правилам Skip сделку лучше пропустить"
+        structTxt = na(hSwH) ? "" : NL + "📍 Структурный максимум HTF: " + f(hSwH) + (tp > hSwH ? " (тейк за ним)" : "")
+        msg = "🟢 <b>" + syminfo.ticker + " · LONG</b> · AMD+FVG 5M" + NL + "⏰ " + sessName + " " + str.format_time(time_close, "HH:mm", tz) + NL + "💧 Снято: " + lLiq + NL + "🧩 Модель: " + modelL + NL + "📈 Тренд D1 ↑, H1 ↑" + NL + "🟪 Снятие в HTF FVG: " + (fvgL ? "да" : "нет") + NL + NL + "▶️ Вход: " + f(close) + NL + "⛔ Стоп: " + f(sl) + " (" + p(risk) + " пт)" + NL + "🎯 Тейк: " + f(tp) + " (RR " + p(rr) + ")" + NL + "💰 Риск " + p(riskPct) + "% = " + p(riskMoney) + " → " + str.tostring(riskMoney / risk, "#.##") + " за пункт" + structTxt + warn + NL + NL + "Проверь сам: красные новости, зоны против тебя на HTF. Решение за тобой."
+        alert(tg(msg), alert.freq_once_per_bar_close)
+        line.new(bar_index, close, bar_index + 24, close, color = color.gray, width = 2)
+        line.new(bar_index, sl, bar_index + 24, sl, color = color.red, width = 2)
+        line.new(bar_index, tp, bar_index + 24, tp, color = color.green, width = 2)
+        label.new(bar_index, lExt, "LONG\n" + modelL, style = label.style_label_up, color = color.green, textcolor = color.white, size = size.small)
+    else if sendSkip
+        alert(tg("⏸ <b>" + syminfo.ticker + "</b> · лонг-сетап пропущен" + NL + "💧 " + lLiq + NL + "🧩 " + modelL + NL + "Причина: " + why), alert.freq_once_per_bar_close)
+
+// SHORT
+if modelS != ""
+    sl   = sExt + bufTicks * syminfo.mintick
+    risk = sl - close
+    tp   = close - rr * risk
+    fvgS = not na(hSBot) and sExt >= hSBot and sExt <= hSTop
+    structS = na(hSwL) or close > hSwL
+    why = skipReason(shortTrend and canShort, structS, fvgS, "S")
+    if risk <= 0
+        why := "некорректный стоп"
+    if why == ""
+        sDone  := true
+        sArmed := false
+        warn = ""
+        if not pdhTaken and not na(pdh) and pdh > sl and pdh - sl <= risk
+            warn := NL + "⚠️ Над стопом неснятый PDH " + f(pdh) + " — по правилам Skip сделку лучше пропустить"
+        else if not asiaHTaken and not na(asiaH) and asiaH > sl and asiaH - sl <= risk
+            warn := NL + "⚠️ Над стопом неснятый high ночи " + f(asiaH) + " — по правилам Skip сделку лучше пропустить"
+        structTxt = na(hSwL) ? "" : NL + "📍 Структурный минимум HTF: " + f(hSwL) + (tp < hSwL ? " (тейк за ним)" : "")
+        msg = "🔴 <b>" + syminfo.ticker + " · SHORT</b> · AMD+FVG 5M" + NL + "⏰ " + sessName + " " + str.format_time(time_close, "HH:mm", tz) + NL + "💧 Снято: " + sLiq + NL + "🧩 Модель: " + modelS + NL + "📉 Тренд D1 ↓, H1 ↓" + NL + "🟪 Снятие в HTF FVG: " + (fvgS ? "да" : "нет") + NL + NL + "▶️ Вход: " + f(close) + NL + "⛔ Стоп: " + f(sl) + " (" + p(risk) + " пт)" + NL + "🎯 Тейк: " + f(tp) + " (RR " + p(rr) + ")" + NL + "💰 Риск " + p(riskPct) + "% = " + p(riskMoney) + " → " + str.tostring(riskMoney / risk, "#.##") + " за пункт" + structTxt + warn + NL + NL + "Проверь сам: красные новости, зоны против тебя на HTF. Решение за тобой."
+        alert(tg(msg), alert.freq_once_per_bar_close)
+        line.new(bar_index, close, bar_index + 24, close, color = color.gray, width = 2)
+        line.new(bar_index, sl, bar_index + 24, sl, color = color.red, width = 2)
+        line.new(bar_index, tp, bar_index + 24, tp, color = color.green, width = 2)
+        label.new(bar_index, sExt, "SHORT\n" + modelS, style = label.style_label_down, color = color.red, textcolor = color.white, size = size.small)
+    else if sendSkip
+        alert(tg("⏸ <b>" + syminfo.ticker + "</b> · шорт-сетап пропущен" + NL + "💧 " + sLiq + NL + "🧩 " + modelS + NL + "Причина: " + why), alert.freq_once_per_bar_close)
+
+// ───────── Уровни на графике ─────────
+plot(pdh, "PDH", color = color.new(color.orange, 30), style = plot.style_stepline)
+plot(pdl, "PDL", color = color.new(color.orange, 30), style = plot.style_stepline)
+plot(inAsia ? na : asiaH, "Ночь high", color = color.new(color.purple, 40), style = plot.style_linebr)
+plot(inAsia ? na : asiaL, "Ночь low", color = color.new(color.purple, 40), style = plot.style_linebr)
+plot(hBTop, "HTF bull FVG top", color = color.new(color.teal, 60), style = plot.style_linebr)
+plot(hBBot, "HTF bull FVG bottom", color = color.new(color.teal, 60), style = plot.style_linebr)
+plot(hSTop, "HTF bear FVG top", color = color.new(color.maroon, 60), style = plot.style_linebr)
+plot(hSBot, "HTF bear FVG bottom", color = color.new(color.maroon, 60), style = plot.style_linebr)
+
+// ───────── Панель статуса ─────────
+var table panel = table.new(position.top_right, 2, 5, bgcolor = color.new(color.black, 20), border_width = 1)
+if barstate.islast
+    table.cell(panel, 0, 0, "D1", text_color = color.white)
+    table.cell(panel, 1, 0, upD ? "↑" : dnD ? "↓" : "боковик", text_color = upD ? color.lime : dnD ? color.red : color.gray)
+    table.cell(panel, 0, 1, "H1", text_color = color.white)
+    table.cell(panel, 1, 1, upH ? "↑" : dnH ? "↓" : "нейтр.", text_color = upH ? color.lime : dnH ? color.red : color.gray)
+    table.cell(panel, 0, 2, "Тайминг", text_color = color.white)
+    table.cell(panel, 1, 2, inKZ ? sessName : "нет", text_color = inKZ ? color.aqua : color.gray)
+    table.cell(panel, 0, 3, "Сетап", text_color = color.white)
+    table.cell(panel, 1, 3, lArmed ? "лонг: ждём модель" : sArmed ? "шорт: ждём модель" : "—", text_color = color.yellow)
+    table.cell(panel, 0, 4, "ТФ", text_color = color.white)
+    table.cell(panel, 1, 4, timeframe.period == "5" ? "5M ✓" : "поставь 5M", text_color = timeframe.period == "5" ? color.lime : color.red)

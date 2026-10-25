@@ -87,7 +87,7 @@ railway init
 
 #### 4. Добавь переменные окружения
 ```bash
-railway variable set TELEGRAM_BOT_TOKEN "8999356089:AAEzV2onmpC6oFe-j19M26UTFLxU14N6fSCs"
+railway variable set TELEGRAM_BOT_TOKEN "YOUR_BOT_TOKEN"
 railway variable set TELEGRAM_CHAT_ID "457832510"
 railway variable set TRADINGVIEW_SESSION_ID "qu1s4tex582n1uzvgl9m35we03cbn6f2"
 ```
@@ -114,7 +114,7 @@ railway up
 #### 4. Выбери переменные окружения
 Нажми "Add Variable":
 ```
-TELEGRAM_BOT_TOKEN = 8999356089:AAEzV2onmpC6oFe-j19M26UTFLxU14N6fSCs
+TELEGRAM_BOT_TOKEN = YOUR_BOT_TOKEN
 TELEGRAM_CHAT_ID = 457832510
 TRADINGVIEW_SESSION_ID = qu1s4tex582n1uzvgl9m35we03cbn6f2
 ```

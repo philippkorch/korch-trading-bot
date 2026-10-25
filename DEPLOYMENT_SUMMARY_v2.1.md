@@ -108,7 +108,7 @@ git push origin main
 
 # 2. На Railway Dashboard:
 # - Project Settings → Variables
-# - TELEGRAM_BOT_TOKEN = 8999356089:AAEzV2onmpC6oFe-j9M26UTFLxU14N6fSCs
+# - TELEGRAM_BOT_TOKEN = YOUR_BOT_TOKEN
 # - TELEGRAM_CHAT_ID = 8999356089
 
 # 3. Deploy → Auto-deploy from GitHub

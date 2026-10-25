@@ -184,7 +184,7 @@ Bot name: Korch Trading Bot (или ваше имя)
 Bot username: korch_trading_bot (уникальный, с англ. букв)
 
 Вы получите токен вида:
-8999356089:AAEzV2onmpC6oFe-j9M26UTFLxU14N6fSCs
+YOUR_BOT_TOKEN
 ```
 
 **Сохраните этот токен в `TELEGRAM_BOT_TOKEN`**

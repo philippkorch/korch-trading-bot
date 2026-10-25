@@ -113,7 +113,7 @@ PYTHON_VERSION = "3.11"
   /start
   /newbot
   Введите имя: Korch Trading Bot
-  Получите токен вида: 8999356089:AAEzV2onmpC6oFe-j9M26UTFLxU14N6fSCs
+  Получите токен вида: YOUR_BOT_TOKEN
   ```
 
 - **TELEGRAM_CHAT_ID**: Отправьте сообщение боту, затем:

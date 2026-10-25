@@ -271,7 +271,7 @@ python test_intellect_city.py
 python -m py_compile korch_trading_bot.py
 
 # 4. Запустить бот локально (с DEMO_MODE=False для реальных данных)
-export TELEGRAM_BOT_TOKEN="8999356089:AAEzV2onmpC6oFe-j9M26UTFLxU14N6fSCs"
+export TELEGRAM_BOT_TOKEN="YOUR_BOT_TOKEN"
 export TELEGRAM_CHAT_ID="8999356089"
 python korch_trading_bot.py
 

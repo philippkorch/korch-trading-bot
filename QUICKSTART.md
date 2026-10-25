@@ -45,7 +45,7 @@ python korch_trading_bot.py
 2. Нажми "+ New Project" → "Deploy from GitHub"
 3. Выбери этот репо (или создай новый репо на GitHub и push туда)
 4. Добавь переменные:
-   - `TELEGRAM_BOT_TOKEN` = `8999356089:AAEzV2onmpC6oFe-j19M26UTFLxU14N6fSCs`
+   - `TELEGRAM_BOT_TOKEN` = `YOUR_BOT_TOKEN`
    - `TELEGRAM_CHAT_ID` = `457832510`
    - `TRADINGVIEW_SESSION_ID` = `qu1s4tex582n1uzvgl9m35we03cbn6f2`
 5. Нажми "Deploy"
